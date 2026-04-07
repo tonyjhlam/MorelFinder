@@ -1,0 +1,79 @@
+import '../App.css'
+
+const LAYER_GROUPS = [
+  {
+    label: 'Fire Perimeters',
+    ids: ['fires2024', 'fires2025'],
+  },
+  {
+    label: 'Snow & Precipitation',
+    ids: ['snodas', 'modisSnow', 'noaaQpe'],
+  },
+  {
+    label: 'Vegetation',
+    ids: ['landfire'],
+  },
+  {
+    label: 'Ground Truth',
+    ids: ['snotel', 'inat'],
+  },
+]
+
+function Toggle({ id, checked, onChange }) {
+  return (
+    <label className="layer-toggle" htmlFor={id}>
+      <input
+        id={id}
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+      />
+      <span className="layer-toggle-track" />
+    </label>
+  )
+}
+
+export default function LayerPanel({ layers, visibility, onToggle, isOpen }) {
+  return (
+    <aside className={`layer-panel${isOpen ? '' : ' closed'}`}>
+      <div className="layer-panel-header">Map Layers</div>
+
+      {LAYER_GROUPS.map(group => (
+        <div key={group.label} className="layer-group">
+          <div className="layer-group-label">{group.label}</div>
+          {group.ids.map(id => {
+            const layer = layers[id]
+            if (!layer) return null
+            return (
+              <div
+                key={id}
+                className="layer-item"
+                onClick={() => onToggle(id)}
+              >
+                <Toggle
+                  id={`toggle-${id}`}
+                  checked={!!visibility[id]}
+                  onChange={() => onToggle(id)}
+                />
+                <span
+                  className="layer-swatch"
+                  style={{ background: layer.color }}
+                />
+                <div className="layer-text">
+                  <div className="layer-label">{layer.label}</div>
+                  <div className="layer-desc">{layer.description}</div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ))}
+
+      <div className="panel-tip">
+        <strong>Click the map</strong> for soil temp &amp; GDD at any point.<br />
+        <strong>Click a fire</strong> for burn details and morel outlook.<br />
+        <strong>Click a marker</strong> for live station data.
+      </div>
+    </aside>
+  )
+}
