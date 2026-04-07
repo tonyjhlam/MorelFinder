@@ -129,6 +129,96 @@ function addWMSLayers(map) {
     paint: { 'raster-opacity': 0.6 },
     layout: { visibility: 'none' },
   })
+
+  // National Forests (USFS EDW)
+  map.addSource('nat-forests', {
+    type: 'raster',
+    tiles: [makeTileUrl(
+      'https://apps.fs.usda.gov/arcx/services/EDW/EDW_ForestSystemBoundaries_01/MapServer/WMSServer',
+      { LAYERS: '1' },
+    )],
+    tileSize: 256,
+    attribution: 'USDA Forest Service',
+  })
+  map.addLayer({
+    id: 'nat-forests-layer',
+    type: 'raster',
+    source: 'nat-forests',
+    paint: { 'raster-opacity': 0.35 },
+    layout: { visibility: 'none' },
+  })
+
+  // Wilderness Areas (USFS EDW)
+  map.addSource('wilderness', {
+    type: 'raster',
+    tiles: [makeTileUrl(
+      'https://apps.fs.usda.gov/arcx/services/EDW/EDW_Wilderness_01/MapServer/WMSServer',
+      { LAYERS: '0' },
+    )],
+    tileSize: 256,
+    attribution: 'USDA Forest Service',
+  })
+  map.addLayer({
+    id: 'wilderness-layer',
+    type: 'raster',
+    source: 'wilderness',
+    paint: { 'raster-opacity': 0.45 },
+    layout: { visibility: 'none' },
+  })
+
+  // National Parks & Monuments (NPS)
+  map.addSource('nat-parks', {
+    type: 'raster',
+    tiles: [makeTileUrl(
+      'https://mapservices.nps.gov/arcgis/services/LandResourcesDivisionTractAndBoundaryService/MapServer/WMSServer',
+      { LAYERS: '2' },
+    )],
+    tileSize: 256,
+    attribution: 'National Park Service',
+  })
+  map.addLayer({
+    id: 'nat-parks-layer',
+    type: 'raster',
+    source: 'nat-parks',
+    paint: { 'raster-opacity': 0.45 },
+    layout: { visibility: 'none' },
+  })
+
+  // BLM Surface Management Agency
+  map.addSource('blm-lands', {
+    type: 'raster',
+    tiles: [makeTileUrl(
+      'https://gis.blm.gov/arcgis/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/WMSServer',
+      { LAYERS: '0' },
+    )],
+    tileSize: 256,
+    attribution: 'Bureau of Land Management',
+  })
+  map.addLayer({
+    id: 'blm-lands-layer',
+    type: 'raster',
+    source: 'blm-lands',
+    paint: { 'raster-opacity': 0.45 },
+    layout: { visibility: 'none' },
+  })
+
+  // Washington DNR State Lands
+  map.addSource('wa-dnr-lands', {
+    type: 'raster',
+    tiles: [makeTileUrl(
+      'https://gis.dnr.wa.gov/site3/services/Public_Boundaries/WADNR_PUBLIC_Major_Public_Lands_NonDNR/MapServer/WMSServer',
+      { LAYERS: '1' },
+    )],
+    tileSize: 256,
+    attribution: 'Washington DNR',
+  })
+  map.addLayer({
+    id: 'wa-dnr-lands-layer',
+    type: 'raster',
+    source: 'wa-dnr-lands',
+    paint: { 'raster-opacity': 0.45 },
+    layout: { visibility: 'none' },
+  })
 }
 
 // ─── Fire layer helpers ──────────────────────────────────────────────────────
@@ -334,6 +424,11 @@ export default function Map({
     setVis(m, 'modis-snow-layer',   layerVis.modisSnow)
     setVis(m, 'landfire-layer',     layerVis.landfire)
     setVis(m, 'noaa-qpe-layer',     layerVis.noaaQpe)
+    setVis(m, 'nat-forests-layer',  layerVis.natForests)
+    setVis(m, 'wilderness-layer',   layerVis.wilderness)
+    setVis(m, 'nat-parks-layer',    layerVis.natParks)
+    setVis(m, 'blm-lands-layer',    layerVis.blmLands)
+    setVis(m, 'wa-dnr-lands-layer', layerVis.waDnrLands)
   }, [mapReady, layerVis])
 
   // ── SNOTEL markers ────────────────────────────────────────────────────────────

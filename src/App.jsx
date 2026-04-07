@@ -65,6 +65,41 @@ export const LAYERS = {
     color: '#98C379',
     defaultOn: true,
   },
+  natForests: {
+    id: 'natForests',
+    label: 'National Forests',
+    description: 'USFS — personal-use picking generally allowed (up to 1 gallon/day)',
+    color: '#2d6a4f',
+    defaultOn: true,
+  },
+  wilderness: {
+    id: 'wilderness',
+    label: 'Wilderness Areas',
+    description: 'Within NFs — picking allowed, no motorized vehicles',
+    color: '#1a3a5c',
+    defaultOn: false,
+  },
+  natParks: {
+    id: 'natParks',
+    label: 'National Parks & Monuments',
+    description: 'NPS units — foraging generally prohibited',
+    color: '#7d3c0a',
+    defaultOn: false,
+  },
+  blmLands: {
+    id: 'blmLands',
+    label: 'BLM Lands',
+    description: 'Bureau of Land Management — picking generally allowed',
+    color: '#c9a227',
+    defaultOn: false,
+  },
+  waDnrLands: {
+    id: 'waDnrLands',
+    label: 'WA State Lands (DNR)',
+    description: 'Washington DNR state forests — free permit required for commercial, personal use OK',
+    color: '#6d8b3a',
+    defaultOn: false,
+  },
 }
 
 function buildDefaultVisibility() {

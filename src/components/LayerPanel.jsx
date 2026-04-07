@@ -10,6 +10,10 @@ const LAYER_GROUPS = [
     ids: ['snodas', 'modisSnow', 'noaaQpe'],
   },
   {
+    label: 'Public Lands',
+    ids: ['natForests', 'wilderness', 'natParks', 'blmLands', 'waDnrLands'],
+  },
+  {
     label: 'Vegetation',
     ids: ['landfire'],
   },
