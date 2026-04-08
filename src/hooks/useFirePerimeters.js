@@ -175,6 +175,24 @@ async function fetchPerimeters(year) {
   return { type: 'FeatureCollection', features: [] }
 }
 
+// ── Static file loader (pre-downloaded at build time) ─────────────────────────
+
+async function loadStaticFile(year) {
+  const base = import.meta.env.BASE_URL ?? '/'
+  const url = `${base}data/fires-${year}.geojson`
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
+    if (!res.ok) { console.log(`[NIFC] No static file for ${year} (HTTP ${res.status})`); return null }
+    const json = await res.json()
+    if (!json?.features?.length) { console.log(`[NIFC] Static file for ${year} is empty`); return null }
+    console.log(`[NIFC] Loaded static fires-${year}.geojson (${json.features.length} features)`)
+    return json
+  } catch (e) {
+    console.log(`[NIFC] Static file fetch failed for ${year}:`, e.message)
+    return null
+  }
+}
+
 // ── React hook ────────────────────────────────────────────────────────────────
 
 export function useFirePerimeters(year) {
@@ -187,13 +205,22 @@ export function useFirePerimeters(year) {
     setLoading(true)
     setError(null)
 
-    fetchPerimeters(year)
-      .then(geojson => {
-        if (!cancelled) { setData(geojson); setLoading(false) }
-      })
-      .catch(err => {
-        if (!cancelled) { setError(err.message); setLoading(false) }
-      })
+    ;(async () => {
+      // Try pre-built static file first (served from public/data/ at build time)
+      const staticData = await loadStaticFile(year)
+      if (staticData) {
+        if (!cancelled) { setData(staticData); setLoading(false) }
+        return
+      }
+      // Fall back to live NIFC API (works in local dev, may fail on GitHub Pages due to CORS)
+      fetchPerimeters(year)
+        .then(geojson => {
+          if (!cancelled) { setData(geojson); setLoading(false) }
+        })
+        .catch(err => {
+          if (!cancelled) { setError(err.message); setLoading(false) }
+        })
+    })()
 
     return () => { cancelled = true }
   }, [year])
