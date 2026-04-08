@@ -1,32 +1,28 @@
 import { useState, useEffect } from 'react'
 
 // ── Service URLs ─────────────────────────────────────────────────────────────
+// Confirmed NIFC ArcGIS Online org: T4QMspbfLg3qTGWY
+// Service names verified via NIFC open data portal search results.
 
 const NIFC = 'https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services'
 
-// USFS Enterprise Data Warehouse — fire perimeter history on NFS lands.
-// Different org/schema than NIFC but reliable fallback for Cascade fires.
+// Full history (all years — primary source for 2024/2025 completed seasons)
+const HISTORY  = `${NIFC}/WFIGS_Interagency_Perimeters/FeatureServer/0/query`
+// Year-to-date (confirmed service name — contains the current calendar year)
+const YTD      = `${NIFC}/WFIGS_Interagency_Perimeters_YearToDate/FeatureServer/0/query`
+// USFS EDW — fires on National Forest System lands, independent fallback
 const USFS_EDW = 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_FirePerimeterHistory_01/MapServer/1/query'
 
-function nifcServicesForYear(year) {
-  return [
-    `${NIFC}/WFIGS_Interagency_Perimeters_${year}/FeatureServer/0/query`,
-    `${NIFC}/WFIGS_${year}_Interagency_Perimeters/FeatureServer/0/query`,
-    `${NIFC}/WFIGS_Interagency_Perimeters/FeatureServer/0/query`,
-    `${NIFC}/WFIGS_Interagency_Perimeters_YTD/FeatureServer/0/query`,
-  ]
-}
+// ── PNW state + bbox filters ──────────────────────────────────────────────────
 
-// ── PNW bounding box ─────────────────────────────────────────────────────────
+// State-based filter is more reliable than a bbox geometry query.
+// WA, OR, ID, MT covers the western Cascades and relevant east-slope fires.
+const PNW_STATES = `'WA','OR','ID','MT'`
 
+// Fallback: client-side bounding box check
 const PNW = { xmin: -126, ymin: 44, xmax: -115, ymax: 50 }
 
-// Server-side bbox (used only in Pass 1 where we know the service supports it)
-const PNW_BBOX = `${PNW.xmin},${PNW.ymin},${PNW.xmax},${PNW.ymax}`
-
-// Client-side PNW filter — works on any GeoJSON feature
 function isInPNW(feature) {
-  if (!feature.geometry) return false
   const coords = firstCoord(feature.geometry)
   if (!coords) return false
   const [lng, lat] = coords
@@ -42,18 +38,26 @@ function firstCoord(geom) {
   return null
 }
 
-// ── Year field helpers ────────────────────────────────────────────────────────
+// ── Field name helpers ────────────────────────────────────────────────────────
 
-const NIFC_YEAR_FIELDS  = ['attr_FireYear', 'FireYear', 'FIRE_YEAR', 'fireYear']
-const USFS_YEAR_FIELDS  = ['FIRE_YEAR', 'FireYear', 'attr_FireYear']
+const YEAR_FIELDS = ['attr_FireYear', 'FireYear', 'FIRE_YEAR', 'fireYear']
+const STATE_FIELDS = ['attr_POOState', 'POOState', 'STATE', 'state']
 
-function getYear(feature, fields) {
+function getIntField(feature, fields) {
   const p = feature.properties || {}
   for (const f of fields) {
     if (p[f] != null) {
-      const y = parseInt(p[f], 10)
-      if (!isNaN(y)) return y
+      const v = parseInt(p[f], 10)
+      if (!isNaN(v)) return v
     }
+  }
+  return null
+}
+
+function getStrField(feature, fields) {
+  const p = feature.properties || {}
+  for (const f of fields) {
+    if (p[f] != null) return String(p[f]).trim().toUpperCase()
   }
   return null
 }
@@ -62,120 +66,112 @@ function getYear(feature, fields) {
 
 async function tryFetch(url) {
   const res = await fetch(url, { signal: AbortSignal.timeout(20000) })
-  if (!res.ok) return null
+  if (!res.ok) {
+    console.warn(`[NIFC] HTTP ${res.status} from`, url)
+    return null
+  }
   const json = await res.json()
   if (json.error) {
-    console.warn('[NIFC] service error:', json.error.message || JSON.stringify(json.error))
+    console.warn('[NIFC] query error:', json.error.message || JSON.stringify(json.error), '|', url)
     return null
   }
   return json
 }
 
-function buildParams(overrides) {
+function qs(params) {
   return new URLSearchParams({
     outFields: '*',
     f: 'geojson',
     resultRecordCount: '2000',
-    ...overrides,
-  })
+    ...params,
+  }).toString()
 }
 
-// ── Main fetch logic ──────────────────────────────────────────────────────────
+// ── Passes ────────────────────────────────────────────────────────────────────
 
 async function fetchPerimeters(year) {
-  const nifcUrls = nifcServicesForYear(year)
-
-  // ── Pass 1: server-side year + bbox filter ─────────────────────────────────
-  // Fastest if the service supports the geometry parameter.
-  for (const url of nifcUrls) {
+  // ── Pass 1: history service, state filter + year filter ────────────────────
+  // Uses a SQL WHERE clause only (no geometry) — most reliable query form.
+  // State filter restricts to PNW states; year filter targets the season.
+  const p1q = qs({ where: `attr_FireYear = ${year} AND attr_POOState IN (${PNW_STATES})` })
+  for (const url of [HISTORY, YTD]) {
     try {
-      const json = await tryFetch(
-        `${url}?${buildParams({
-          where: `attr_FireYear = ${year}`,
-          geometry: PNW_BBOX,
-          geometryType: 'esriGeometryEnvelope',
-          inSR: '4326',
-          spatialRel: 'esriSpatialRelIntersects',
-        })}`
-      )
+      const json = await tryFetch(`${url}?${p1q}`)
       if (json?.features?.length > 0) {
-        console.log(`[NIFC] Pass 1 OK: ${json.features.length} features for ${year}`, url)
+        console.log(`[NIFC] Pass 1 OK (${json.features.length} features, year=${year}):`, url)
         return json
       }
-    } catch (e) {
-      console.warn('[NIFC] Pass 1 error:', e.message)
-    }
+      if (json) console.log('[NIFC] Pass 1: 0 features from', url)
+    } catch (e) { console.warn('[NIFC] Pass 1 error:', e.message) }
   }
 
-  // ── Pass 2: server-side year filter only, client-side bbox ─────────────────
-  // Bypasses any geometry filter issues.
-  for (const url of nifcUrls) {
+  // ── Pass 2: year filter only, no state/geo — client-side PNW filter ────────
+  // In case attr_POOState doesn't exist or state values differ.
+  const p2q = qs({ where: `attr_FireYear = ${year}`, resultRecordCount: '1000' })
+  for (const url of [HISTORY, YTD]) {
     try {
-      const json = await tryFetch(
-        `${url}?${buildParams({ where: `attr_FireYear = ${year}` })}`
-      )
-      if (!json?.features?.length) continue
-      console.log('[NIFC] Pass 2 raw count:', json.features.length,
-        '| sample props:', Object.keys(json.features[0].properties || {}))
-      const filtered = json.features.filter(f =>
-        getYear(f, NIFC_YEAR_FIELDS) === year && isInPNW(f)
-      )
+      const json = await tryFetch(`${url}?${p2q}`)
+      if (!json?.features?.length) {
+        if (json) console.log('[NIFC] Pass 2: 0 raw features from', url)
+        continue
+      }
+      console.log(`[NIFC] Pass 2 raw: ${json.features.length} features | sample props:`,
+        Object.keys(json.features[0].properties || {}))
+      const filtered = json.features.filter(f => isInPNW(f))
       if (filtered.length > 0) {
         console.log(`[NIFC] Pass 2 OK: ${filtered.length} PNW features for ${year}`)
         return { ...json, features: filtered }
       }
-    } catch (e) {
-      console.warn('[NIFC] Pass 2 error:', e.message)
-    }
+    } catch (e) { console.warn('[NIFC] Pass 2 error:', e.message) }
   }
 
-  // ── Pass 3: recent fires only (no year field assumption), client-side all ───
-  // For services that use a different year field name.
-  for (const url of nifcUrls) {
+  // ── Pass 3: try alternate year field names ─────────────────────────────────
+  // Some schema versions use FireYear (no attr_ prefix).
+  const p3q = qs({ where: `FireYear = ${year}` })
+  for (const url of [HISTORY, YTD]) {
     try {
-      const json = await tryFetch(
-        `${url}?${buildParams({
-          where: 'attr_TotalAcres >= 500',
-          orderByFields: 'attr_FireYear DESC',
-        })}`
-      )
+      const json = await tryFetch(`${url}?${p3q}`)
       if (!json?.features?.length) continue
-      console.log('[NIFC] Pass 3 raw count:', json.features.length,
-        '| sample props:', Object.keys(json.features[0].properties || {}))
       const filtered = json.features.filter(f =>
-        getYear(f, NIFC_YEAR_FIELDS) === year && isInPNW(f)
+        getIntField(f, YEAR_FIELDS) === year && isInPNW(f)
       )
       if (filtered.length > 0) {
-        console.log(`[NIFC] Pass 3 OK: ${filtered.length} features for ${year}`)
+        console.log(`[NIFC] Pass 3 OK: ${filtered.length} features (FireYear field)`)
         return { ...json, features: filtered }
       }
-    } catch (e) {
-      console.warn('[NIFC] Pass 3 error:', e.message)
-    }
+    } catch (e) { console.warn('[NIFC] Pass 3 error:', e.message) }
   }
 
-  // ── Pass 4: USFS EDW fallback ──────────────────────────────────────────────
-  // Covers fires on National Forest System lands — the primary morel habitat.
-  // Different schema (FIRE_YEAR not attr_FireYear).
+  // ── Pass 4: wide query, client-side everything ─────────────────────────────
+  // Last resort: recent large fires, no server-side year/geo filter.
+  const p4q = qs({ where: 'attr_TotalAcres >= 500', orderByFields: 'attr_FireYear DESC' })
   try {
-    const json = await tryFetch(
-      `${USFS_EDW}?${buildParams({ where: `FIRE_YEAR = ${year}` })}`
-    )
+    const json = await tryFetch(`${HISTORY}?${p4q}`)
     if (json?.features?.length > 0) {
+      console.log(`[NIFC] Pass 4 wide raw: ${json.features.length} | props:`,
+        Object.keys(json.features[0].properties || {}))
       const filtered = json.features.filter(f =>
-        getYear(f, USFS_YEAR_FIELDS) === year && isInPNW(f)
+        getIntField(f, YEAR_FIELDS) === year && isInPNW(f)
       )
       if (filtered.length > 0) {
-        console.log(`[NIFC] Pass 4 USFS EDW OK: ${filtered.length} features for ${year}`)
+        console.log(`[NIFC] Pass 4 OK: ${filtered.length} features for ${year}`)
         return { ...json, features: filtered }
       }
     }
-  } catch (e) {
-    console.warn('[NIFC] Pass 4 USFS error:', e.message)
-  }
+  } catch (e) { console.warn('[NIFC] Pass 4 error:', e.message) }
 
-  console.warn(`[NIFC] All passes exhausted for year ${year}. ` +
-    'Open DevTools → Network to check for CORS or 4xx errors on ArcGIS requests.')
+  // ── Pass 5: USFS EDW (NFS lands only, different schema) ───────────────────
+  const p5q = qs({ where: `FIRE_YEAR = ${year} AND STATE IN (${PNW_STATES})` })
+  try {
+    const json = await tryFetch(`${USFS_EDW}?${p5q}`)
+    if (json?.features?.length > 0) {
+      console.log(`[NIFC] Pass 5 USFS EDW OK: ${json.features.length} features for ${year}`)
+      return json
+    }
+  } catch (e) { console.warn('[NIFC] Pass 5 USFS error:', e.message) }
+
+  console.warn(`[NIFC] All passes failed for year=${year}. ` +
+    'Open DevTools → Network to check for CORS errors on services3.arcgis.com requests.')
   return { type: 'FeatureCollection', features: [] }
 }
 
