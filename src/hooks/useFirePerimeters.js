@@ -1,19 +1,18 @@
 import { useState, useEffect } from 'react'
 
-// NIFC/WFIGS ArcGIS Online org ID
 const ORG = 'https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services'
 
 // Service URL candidates per year, tried in order.
-// NIFC typically archives each fire season into a year-specific service
-// (e.g. WFIGS_Interagency_Perimeters_2024) and the full history service.
-// The YTD service contains the current calendar year only.
+// NIFC uses two naming conventions across seasons, so we try both.
 function serviceUrlsForYear(year) {
   return [
-    // Year-specific archive (most reliable for completed seasons)
+    // Year-suffix pattern (e.g. WFIGS_Interagency_Perimeters_2024)
     `${ORG}/WFIGS_Interagency_Perimeters_${year}/FeatureServer/0/query`,
-    // Full history service (may lag a season behind)
+    // Year-prefix pattern (e.g. WFIGS_2024_Interagency_Perimeters)
+    `${ORG}/WFIGS_${year}_Interagency_Perimeters/FeatureServer/0/query`,
+    // Full history service — updated annually by NIFC
     `${ORG}/WFIGS_Interagency_Perimeters/FeatureServer/0/query`,
-    // YTD service (only works if year === current calendar year)
+    // YTD service — only relevant if year === current calendar year
     `${ORG}/WFIGS_Interagency_Perimeters_YTD/FeatureServer/0/query`,
   ]
 }
@@ -24,24 +23,40 @@ const PNW_BBOX = '-126,44,-115,50'
 // Possible field names for fire year across WFIGS schema versions
 const YEAR_FIELDS = ['attr_FireYear', 'FireYear', 'FIRE_YEAR', 'fireYear']
 
-function buildQuery(serviceUrl, year) {
+function buildYearQuery(serviceUrl, year) {
   const params = new URLSearchParams({
-    // Try attr_FireYear first; if the service has a different schema the
-    // fallback query (below) catches it with client-side filtering.
     where: `attr_FireYear = ${year}`,
     geometry: PNW_BBOX,
     geometryType: 'esriGeometryEnvelope',
     inSR: '4326',
     spatialRel: 'esriSpatialRelIntersects',
-    outFields: '*',   // fetch all fields — resilient to schema changes
+    outFields: '*',
     f: 'geojson',
     resultRecordCount: '2000',
   })
   return `${serviceUrl}?${params.toString()}`
 }
 
-// Broad fallback: no year filter, just bbox — we filter client-side
+// Broad fallback: recent years only, ordered descending so 2024/2025
+// appear before older entries within the resultRecordCount window.
 function buildBboxQuery(serviceUrl) {
+  const params = new URLSearchParams({
+    where: 'attr_FireYear >= 2024',
+    geometry: PNW_BBOX,
+    geometryType: 'esriGeometryEnvelope',
+    inSR: '4326',
+    spatialRel: 'esriSpatialRelIntersects',
+    outFields: '*',
+    orderByFields: 'attr_FireYear DESC',
+    f: 'geojson',
+    resultRecordCount: '2000',
+  })
+  return `${serviceUrl}?${params.toString()}`
+}
+
+// Widest fallback: no year filter, just bbox + recent ordering.
+// Used when attr_FireYear field doesn't exist (different schema version).
+function buildWideQuery(serviceUrl) {
   const params = new URLSearchParams({
     where: '1=1',
     geometry: PNW_BBOX,
@@ -55,11 +70,14 @@ function buildBboxQuery(serviceUrl) {
   return `${serviceUrl}?${params.toString()}`
 }
 
-// Extract a feature's fire year from whichever field exists
+// Returns year as integer, handles numeric/string/float variants.
 function getFeatureYear(feature) {
   const p = feature.properties || {}
   for (const field of YEAR_FIELDS) {
-    if (p[field] != null) return String(p[field])
+    if (p[field] != null) {
+      const y = parseInt(p[field], 10)
+      if (!isNaN(y)) return y
+    }
   }
   return null
 }
@@ -68,9 +86,8 @@ async function tryFetch(url) {
   const res = await fetch(url, { signal: AbortSignal.timeout(20000) })
   if (!res.ok) return null
   const json = await res.json()
-  // ArcGIS returns HTTP 200 with an error object when the query fails
   if (json.error) {
-    console.warn('NIFC query error:', json.error.message || json.error)
+    console.warn('[NIFC] query error:', json.error.message || JSON.stringify(json.error))
     return null
   }
   return json
@@ -79,35 +96,56 @@ async function tryFetch(url) {
 async function fetchPerimeters(year) {
   const urls = serviceUrlsForYear(year)
 
-  // Pass 1: year-filtered query against each service URL
+  // Pass 1 — year-filtered WHERE clause against each service
   for (const serviceUrl of urls) {
     try {
-      const json = await tryFetch(buildQuery(serviceUrl, year))
+      const json = await tryFetch(buildYearQuery(serviceUrl, year))
       if (json?.features?.length > 0) {
-        console.log(`NIFC: loaded ${json.features.length} features for ${year} from ${serviceUrl}`)
+        console.log(`[NIFC] ${json.features.length} features for ${year} via year-filter:`, serviceUrl)
         return json
       }
     } catch (e) {
-      console.warn('NIFC fetch failed:', e.message)
+      console.warn('[NIFC] fetch error (pass 1):', e.message)
     }
   }
 
-  // Pass 2: broad bbox query + client-side year filter (handles schema differences)
+  // Pass 2 — WHERE attr_FireYear >= 2024, filter client-side by exact year.
+  // Handles cases where the year-specific service doesn't exist but the
+  // history service has recent data.
   for (const serviceUrl of urls) {
     try {
       const json = await tryFetch(buildBboxQuery(serviceUrl))
-      if (!json?.features) continue
-      const filtered = json.features.filter(f => getFeatureYear(f) === String(year))
+      if (!json?.features?.length) continue
+      // Log property keys of first feature to aid debugging
+      console.log('[NIFC] pass 2 sample props:', Object.keys(json.features[0].properties || {}))
+      const filtered = json.features.filter(f => getFeatureYear(f) === year)
       if (filtered.length > 0) {
-        console.log(`NIFC: client-filtered ${filtered.length} features for ${year} from ${serviceUrl}`)
+        console.log(`[NIFC] ${filtered.length} features for ${year} via client-filter:`, serviceUrl)
         return { ...json, features: filtered }
       }
     } catch (e) {
-      console.warn('NIFC broad fetch failed:', e.message)
+      console.warn('[NIFC] fetch error (pass 2):', e.message)
     }
   }
 
-  console.warn(`NIFC: no fire perimeters found for year ${year} in PNW bbox`)
+  // Pass 3 — widest possible query, client-side year filter.
+  // Handles alternative schema versions that don't have attr_FireYear.
+  for (const serviceUrl of urls) {
+    try {
+      const json = await tryFetch(buildWideQuery(serviceUrl))
+      if (!json?.features?.length) continue
+      console.log('[NIFC] pass 3 sample props:', Object.keys(json.features[0].properties || {}))
+      const filtered = json.features.filter(f => getFeatureYear(f) === year)
+      if (filtered.length > 0) {
+        console.log(`[NIFC] ${filtered.length} features for ${year} via wide filter:`, serviceUrl)
+        return { ...json, features: filtered }
+      }
+    } catch (e) {
+      console.warn('[NIFC] fetch error (pass 3):', e.message)
+    }
+  }
+
+  console.warn(`[NIFC] no perimeters found for year ${year}. Check console for CORS errors or service availability.`)
   return { type: 'FeatureCollection', features: [] }
 }
 
