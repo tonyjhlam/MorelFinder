@@ -130,95 +130,8 @@ function addWMSLayers(map) {
     layout: { visibility: 'none' },
   })
 
-  // National Forests (USFS EDW)
-  map.addSource('nat-forests', {
-    type: 'raster',
-    tiles: [makeTileUrl(
-      'https://apps.fs.usda.gov/arcx/services/EDW/EDW_ForestSystemBoundaries_01/MapServer/WMSServer',
-      { LAYERS: '1' },
-    )],
-    tileSize: 256,
-    attribution: 'USDA Forest Service',
-  })
-  map.addLayer({
-    id: 'nat-forests-layer',
-    type: 'raster',
-    source: 'nat-forests',
-    paint: { 'raster-opacity': 0.35 },
-    layout: { visibility: 'none' },
-  })
-
-  // Wilderness Areas (USFS EDW)
-  map.addSource('wilderness', {
-    type: 'raster',
-    tiles: [makeTileUrl(
-      'https://apps.fs.usda.gov/arcx/services/EDW/EDW_Wilderness_01/MapServer/WMSServer',
-      { LAYERS: '0' },
-    )],
-    tileSize: 256,
-    attribution: 'USDA Forest Service',
-  })
-  map.addLayer({
-    id: 'wilderness-layer',
-    type: 'raster',
-    source: 'wilderness',
-    paint: { 'raster-opacity': 0.45 },
-    layout: { visibility: 'none' },
-  })
-
-  // National Parks & Monuments (NPS)
-  map.addSource('nat-parks', {
-    type: 'raster',
-    tiles: [makeTileUrl(
-      'https://mapservices.nps.gov/arcgis/services/LandResourcesDivisionTractAndBoundaryService/MapServer/WMSServer',
-      { LAYERS: '2' },
-    )],
-    tileSize: 256,
-    attribution: 'National Park Service',
-  })
-  map.addLayer({
-    id: 'nat-parks-layer',
-    type: 'raster',
-    source: 'nat-parks',
-    paint: { 'raster-opacity': 0.45 },
-    layout: { visibility: 'none' },
-  })
-
-  // BLM Surface Management Agency
-  map.addSource('blm-lands', {
-    type: 'raster',
-    tiles: [makeTileUrl(
-      'https://gis.blm.gov/arcgis/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/WMSServer',
-      { LAYERS: '0' },
-    )],
-    tileSize: 256,
-    attribution: 'Bureau of Land Management',
-  })
-  map.addLayer({
-    id: 'blm-lands-layer',
-    type: 'raster',
-    source: 'blm-lands',
-    paint: { 'raster-opacity': 0.45 },
-    layout: { visibility: 'none' },
-  })
-
-  // Washington DNR State Lands
-  map.addSource('wa-dnr-lands', {
-    type: 'raster',
-    tiles: [makeTileUrl(
-      'https://gis.dnr.wa.gov/site3/services/Public_Boundaries/WADNR_PUBLIC_Major_Public_Lands_NonDNR/MapServer/WMSServer',
-      { LAYERS: '1' },
-    )],
-    tileSize: 256,
-    attribution: 'Washington DNR',
-  })
-  map.addLayer({
-    id: 'wa-dnr-lands-layer',
-    type: 'raster',
-    source: 'wa-dnr-lands',
-    paint: { 'raster-opacity': 0.45 },
-    layout: { visibility: 'none' },
-  })
+  // Public lands are now GeoJSON vector layers loaded via usePublicLands hook.
+  // WMS removed — government WMS servers block cross-origin browser requests.
 }
 
 // ─── Fire layer helpers ──────────────────────────────────────────────────────
@@ -279,6 +192,34 @@ function setVis(map, layerId, visible) {
   }
 }
 
+// ─── Public lands layer helper ───────────────────────────────────────────────
+
+function ensurePublicLandLayer(map, id, geojson, fillColor, lineColor, fillOpacity = 0.22) {
+  if (map.getSource(id)) {
+    map.getSource(id).setData(geojson)
+    return
+  }
+  map.addSource(id, { type: 'geojson', data: geojson })
+  map.addLayer({
+    id: `${id}-fill`,
+    type: 'fill',
+    source: id,
+    paint: { 'fill-color': fillColor, 'fill-opacity': fillOpacity },
+    layout: { visibility: 'none' },
+  })
+  map.addLayer({
+    id: `${id}-line`,
+    type: 'line',
+    source: id,
+    paint: {
+      'line-color': lineColor,
+      'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.5, 10, 1.5],
+      'line-opacity': 0.7,
+    },
+    layout: { visibility: 'none' },
+  })
+}
+
 // ─── Fire property normalization ─────────────────────────────────────────────
 
 function fireProps(properties) {
@@ -301,6 +242,7 @@ export default function Map({
   fires2024,
   fires2025,
   wadnrFires,
+  publicLands,
   snotelStations,
   inatObs,
   onPointClick,
@@ -491,6 +433,37 @@ export default function Map({
     })
   }, [mapReady, wadnrFires])
 
+  // ── Public lands vector layers ────────────────────────────────────────────────
+  useEffect(() => {
+    const m = mapRef.current
+    if (!m || !mapReady || !publicLands?.natForests) return
+    ensurePublicLandLayer(m, 'nat-forests', publicLands.natForests, '#2d6a4f', '#1b4332', 0.22)
+  }, [mapReady, publicLands?.natForests])
+
+  useEffect(() => {
+    const m = mapRef.current
+    if (!m || !mapReady || !publicLands?.wilderness) return
+    ensurePublicLandLayer(m, 'wilderness', publicLands.wilderness, '#1a3a5c', '#0d2137', 0.28)
+  }, [mapReady, publicLands?.wilderness])
+
+  useEffect(() => {
+    const m = mapRef.current
+    if (!m || !mapReady || !publicLands?.natParks) return
+    ensurePublicLandLayer(m, 'nat-parks', publicLands.natParks, '#7d3c0a', '#5a2906', 0.28)
+  }, [mapReady, publicLands?.natParks])
+
+  useEffect(() => {
+    const m = mapRef.current
+    if (!m || !mapReady || !publicLands?.blmLands) return
+    ensurePublicLandLayer(m, 'blm-lands', publicLands.blmLands, '#c9a227', '#9a7a1c', 0.22)
+  }, [mapReady, publicLands?.blmLands])
+
+  useEffect(() => {
+    const m = mapRef.current
+    if (!m || !mapReady || !publicLands?.waDnrLands) return
+    ensurePublicLandLayer(m, 'wa-dnr-lands', publicLands.waDnrLands, '#6d8b3a', '#4a6028', 0.22)
+  }, [mapReady, publicLands?.waDnrLands])
+
   // ── Layer visibility ──────────────────────────────────────────────────────────
   useEffect(() => {
     const m = mapRef.current
@@ -506,11 +479,16 @@ export default function Map({
     setVis(m, 'modis-snow-layer',   layerVis.modisSnow)
     setVis(m, 'landfire-layer',     layerVis.landfire)
     setVis(m, 'noaa-qpe-layer',     layerVis.noaaQpe)
-    setVis(m, 'nat-forests-layer',  layerVis.natForests)
-    setVis(m, 'wilderness-layer',   layerVis.wilderness)
-    setVis(m, 'nat-parks-layer',    layerVis.natParks)
-    setVis(m, 'blm-lands-layer',    layerVis.blmLands)
-    setVis(m, 'wa-dnr-lands-layer', layerVis.waDnrLands)
+    setVis(m, 'nat-forests-fill',  layerVis.natForests)
+    setVis(m, 'nat-forests-line',  layerVis.natForests)
+    setVis(m, 'wilderness-fill',   layerVis.wilderness)
+    setVis(m, 'wilderness-line',   layerVis.wilderness)
+    setVis(m, 'nat-parks-fill',    layerVis.natParks)
+    setVis(m, 'nat-parks-line',    layerVis.natParks)
+    setVis(m, 'blm-lands-fill',    layerVis.blmLands)
+    setVis(m, 'blm-lands-line',    layerVis.blmLands)
+    setVis(m, 'wa-dnr-lands-fill', layerVis.waDnrLands)
+    setVis(m, 'wa-dnr-lands-line', layerVis.waDnrLands)
     setVis(m, 'wadnr-fires-halo',   layerVis.wadnrFires)
     setVis(m, 'wadnr-fires-circle', layerVis.wadnrFires)
     setVis(m, 'wadnr-fires-label',  layerVis.wadnrFires)
