@@ -11,7 +11,7 @@
  *   wilderness.geojson        — USFS Wilderness Areas
  *   national-parks.geojson    — NPS units (parks, monuments, recreation areas)
  *   blm-lands.geojson         — BLM Surface Management Agency
- *   wa-dnr-lands.geojson      — WA DNR managed state lands
+ *   wa-dnr-lands.geojson      — WA state-managed lands (DNR state forests)
  */
 
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
@@ -24,34 +24,32 @@ const OUT_DIR = join(__dirname, '..', 'public', 'data')
 // PNW bounding box (WGS84)
 const BBOX = { xmin: -126, ymin: 44, xmax: -115, ymax: 50 }
 
-async function queryService(url, extra = {}) {
-  const params = new URLSearchParams({
-    where: '1=1',
-    geometryType: 'esriGeometryEnvelope',
-    geometry: `${BBOX.xmin},${BBOX.ymin},${BBOX.xmax},${BBOX.ymax}`,
-    inSR: '4326',
-    spatialRel: 'esriSpatialRelIntersects',
-    outFields: '*',
-    outSR: '4326',
-    f: 'geojson',
-    resultRecordCount: '2000',
-    ...extra,
-  })
-  const res = await fetch(`${url}?${params}`, { signal: AbortSignal.timeout(30000) })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const json = await res.json()
-  if (json.error) throw new Error(json.error.message || JSON.stringify(json.error))
-  if (!json.features?.length) throw new Error('0 features returned')
-  return json
-}
-
-async function tryUrls(urls, extra, label) {
-  for (const url of urls) {
+// Each attempt = { url, where?, outFields? }
+// The function tries each in order, returning first success.
+async function tryAttempts(attempts, label) {
+  for (const { url, where = '1=1', outFields = '*', extra = {} } of attempts) {
+    const params = new URLSearchParams({
+      where,
+      geometryType: 'esriGeometryEnvelope',
+      geometry: `${BBOX.xmin},${BBOX.ymin},${BBOX.xmax},${BBOX.ymax}`,
+      inSR: '4326',
+      spatialRel: 'esriSpatialRelIntersects',
+      outFields,
+      outSR: '4326',
+      f: 'geojson',
+      resultRecordCount: '2000',
+      ...extra,
+    })
     try {
-      console.log(`  → ${url.replace(/^https?:\/\/[^/]+/, '')}`)
-      const data = await queryService(url, extra)
-      console.log(`    ✓ ${data.features.length} features`)
-      return data
+      const shortUrl = url.replace(/^https?:\/\/[^/]+/, '')
+      console.log(`  → ${shortUrl} | ${where.slice(0, 50)}`)
+      const res = await fetch(`${url}?${params}`, { signal: AbortSignal.timeout(30000) })
+      if (!res.ok) { console.log(`    ✗ HTTP ${res.status}`); continue }
+      const json = await res.json()
+      if (json.error) { console.log(`    ✗ API: ${json.error.message}`); continue }
+      if (!json.features?.length) { console.log('    ✗ 0 features'); continue }
+      console.log(`    ✓ ${json.features.length} features`)
+      return json
     } catch (e) {
       console.log(`    ✗ ${e.message}`)
     }
@@ -59,55 +57,64 @@ async function tryUrls(urls, extra, label) {
   return null
 }
 
+// ESRI Living Atlas org — CORS-enabled, publicly accessible
+const LIVING_ATLAS = 'https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services'
+
 const DATASETS = [
   {
     name: 'national-forests',
     label: 'National Forests',
-    urls: [
-      'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_ForestSystemBoundaries_01/FeatureServer/1/query',
-      'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_ForestSystemBoundaries_01/MapServer/1/query',
+    attempts: [
+      { url: `${LIVING_ATLAS}/USA_Federal_Lands/FeatureServer/0/query`, where: "ADMIN_AGENCY_CODE='FS' AND STATE='WA'", outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,GIS_ACRES' },
+      { url: `${LIVING_ATLAS}/USA_Federal_Lands/FeatureServer/0/query`, where: "ADMIN_AGENCY_CODE='FS'", outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,GIS_ACRES' },
+      { url: 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_ForestSystemBoundaries_01/FeatureServer/1/query', outFields: 'FORESTNAME,REGION,GIS_ACRES' },
+      { url: 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_ForestSystemBoundaries_01/MapServer/1/query', outFields: 'FORESTNAME,REGION,GIS_ACRES' },
     ],
-    extra: { outFields: 'FORESTNAME,REGION,GIS_ACRES' },
   },
   {
     name: 'wilderness',
     label: 'Wilderness Areas',
-    urls: [
-      'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_Wilderness_01/FeatureServer/0/query',
-      'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_Wilderness_01/MapServer/0/query',
+    attempts: [
+      { url: 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_Wilderness_01/FeatureServer/0/query', outFields: 'NAME,AREAID,GIS_ACRES' },
+      { url: 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_Wilderness_01/MapServer/0/query', outFields: 'NAME,AREAID,GIS_ACRES' },
+      { url: `${LIVING_ATLAS}/USA_Federal_Lands/FeatureServer/0/query`, where: "DESIGNATION='Wilderness'", outFields: 'ADMIN_UNIT_NAME,DESIGNATION,GIS_ACRES' },
     ],
-    extra: { outFields: 'NAME,AREAID,GIS_ACRES' },
   },
   {
     name: 'national-parks',
     label: 'National Parks & Monuments',
-    urls: [
-      'https://mapservices.nps.gov/arcgis/rest/services/LandResourcesDivisionTractAndBoundaryService/MapServer/2/query',
+    attempts: [
+      { url: `${LIVING_ATLAS}/USA_Federal_Lands/FeatureServer/0/query`, where: "ADMIN_AGENCY_CODE='NPS'", outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,GIS_ACRES' },
+      { url: 'https://mapservices.nps.gov/arcgis/rest/services/LandResourcesDivisionTractAndBoundaryService/MapServer/2/query', outFields: 'UNIT_NAME,UNIT_TYPE' },
     ],
-    extra: { outFields: 'UNIT_NAME,UNIT_TYPE' },
   },
   {
     name: 'blm-lands',
     label: 'BLM Lands',
-    urls: [
-      'https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/1/query',
-      'https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/0/query',
+    attempts: [
+      { url: `${LIVING_ATLAS}/USA_Federal_Lands/FeatureServer/0/query`, where: "ADMIN_AGENCY_CODE='BLM'", outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,GIS_ACRES' },
+      { url: 'https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/1/query', outFields: 'AREANAME,AREAID,GIS_ACRES' },
+      { url: 'https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/0/query', outFields: 'AREANAME,AREAID,GIS_ACRES' },
     ],
-    extra: { outFields: 'AREANAME,AREAID,GIS_ACRES' },
   },
   {
     name: 'wa-dnr-lands',
     label: 'WA DNR Lands',
-    // gis.dnr.wa.gov blocks GitHub Actions — use PAD-US Living Atlas (services.arcgis.com, CORS-enabled)
-    // PAD-US fields: State_Nm, Mang_Name, Des_Tp, Unit_Nm, GIS_Acres
-    urls: [
-      'https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Protected_Areas_State/FeatureServer/0/query',
+    // gis.dnr.wa.gov blocks GitHub Actions; use ESRI Living Atlas USA_Protected_Areas_State
+    // which contains PAD-US state-managed lands (CORS-enabled on services.arcgis.com).
+    // PAD-US field: State_Nm = full state name; Mang_Name varies by agency.
+    // Try several where clauses — first success wins.
+    attempts: [
+      // Most specific: WA state-managed lands by state name + DNR manager
+      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='Washington' AND Mang_Name='WADNR'",   outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
+      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='Washington' AND Mang_Name='WA DNR'",  outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
+      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='WA' AND Mang_Name='WADNR'",           outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
+      // Broader: all WA state-managed lands (includes state parks, wildlife areas, etc.)
+      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='Washington'",                         outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
+      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='WA'",                                 outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
+      // Broadest: all state lands in PNW bbox (may include OR/ID state lands too)
+      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "1=1",                                           outFields: 'Unit_Nm,Des_Tp,Mang_Name,State_Nm,GIS_Acres' },
     ],
-    extra: {
-      where: "State_Nm='Washington' AND Mang_Name='WA DNR'",
-      outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres',
-      // Override bbox-based where with agency filter; still apply spatial filter
-    },
   },
 ]
 
@@ -117,7 +124,7 @@ async function main() {
   for (const ds of DATASETS) {
     console.log(`\nFetching ${ds.label}…`)
     const outFile = join(OUT_DIR, `${ds.name}.geojson`)
-    const data = await tryUrls(ds.urls, ds.extra || {}, ds.label)
+    const data = await tryAttempts(ds.attempts, ds.label)
 
     if (data) {
       writeFileSync(outFile, JSON.stringify(data))
