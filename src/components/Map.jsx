@@ -359,12 +359,17 @@ export default function Map({
           const p = pts[0].properties || {}
           onFeatureClick({
             type: 'wadnrFire',
-            name: p.FIRE_NAME || p.IncidentName || p.fireName || 'Unknown Fire',
-            acres: p.TOTAL_ACRES ?? p.GISAcres ?? p.TotalAcres ?? null,
-            year: p.FIRE_YEAR || p.FireYear || 2025,
-            cause: p.CAUSE || p.CauseGeneral || '',
-            agency: p.PROTECTION_AGENCY || p.Agency || 'WADNR',
-            startDate: p.START_DATE || p.DiscoveryDate || null,
+            name: p.INCIDENT_N || 'Unknown Fire',
+            acres: p.ACRES_BURN ?? null,
+            cause: p.FIREGCAUSE || '',
+            causeSpecific: p.FIRESCAUSE || '',
+            county: p.COUNTY_LAB || '',
+            startJurisdiction: p.START_JURI || '',
+            protection: p.PROTECTION || 'WADNR',
+            elevation: p.SITE_ELEV ?? null,
+            discoveryDate: p.DSCVR_DT || null,
+            controlDate: p.CONTROL_DT || null,
+            fireOutDate: p.FIRE_OUT_D || null,
           })
           return
         }
@@ -472,12 +477,7 @@ export default function Map({
       source: 'wadnr-fires',
       minzoom: 10,
       layout: {
-        'text-field': ['coalesce',
-          ['get', 'FIRE_NAME'],
-          ['get', 'IncidentName'],
-          ['get', 'fireName'],
-          '',
-        ],
+        'text-field': ['coalesce', ['get', 'INCIDENT_N'], ''],
         'text-size': 11,
         'text-anchor': 'top',
         'text-offset': [0, 0.8],

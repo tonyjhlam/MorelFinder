@@ -355,31 +355,46 @@ function WADNRFireInfo({ info }) {
       </div>
       <div className="fire-meta-grid">
         <div className="fire-meta-item">
-          <div className="fire-meta-value">{info.year || 2025}</div>
-          <div className="fire-meta-key">Year</div>
-        </div>
-        <div className="fire-meta-item">
           <div className="fire-meta-value">{acresFormatted}</div>
-          <div className="fire-meta-key">Acres</div>
+          <div className="fire-meta-key">Acres Burned</div>
         </div>
+        {info.county && (
+          <div className="fire-meta-item">
+            <div className="fire-meta-value" style={{ fontSize: 13 }}>{info.county}</div>
+            <div className="fire-meta-key">County</div>
+          </div>
+        )}
         {info.cause && (
           <div className="fire-meta-item">
             <div className="fire-meta-value" style={{ fontSize: 12 }}>{info.cause}</div>
-            <div className="fire-meta-key">Cause</div>
+            <div className="fire-meta-key">General Cause</div>
           </div>
         )}
-        {info.agency && (
+        {info.causeSpecific && (
           <div className="fire-meta-item">
-            <div className="fire-meta-value" style={{ fontSize: 12 }}>{info.agency}</div>
-            <div className="fire-meta-key">Agency</div>
+            <div className="fire-meta-value" style={{ fontSize: 12 }}>{info.causeSpecific}</div>
+            <div className="fire-meta-key">Specific Cause</div>
+          </div>
+        )}
+        {info.protection && (
+          <div className="fire-meta-item">
+            <div className="fire-meta-value" style={{ fontSize: 12 }}>{info.protection}</div>
+            <div className="fire-meta-key">Protection</div>
+          </div>
+        )}
+        {info.elevation != null && (
+          <div className="fire-meta-item">
+            <div className="fire-meta-value">{Number(info.elevation).toLocaleString()} ft</div>
+            <div className="fire-meta-key">Elevation</div>
           </div>
         )}
       </div>
-      {info.startDate && (
-        <div style={{ fontSize: 11, color: '#6e7681', marginTop: 6 }}>
-          Start date: {new Date(info.startDate).toLocaleDateString()}
-        </div>
-      )}
+      <div style={{ fontSize: 11, color: '#6e7681', marginTop: 8, lineHeight: 1.7 }}>
+        {info.discoveryDate && <div>Discovered: {info.discoveryDate}</div>}
+        {info.controlDate && <div>Controlled: {info.controlDate}</div>}
+        {info.fireOutDate && <div>Fire Out: {info.fireOutDate}</div>}
+        {info.startJurisdiction && <div>Start Jurisdiction: {info.startJurisdiction}</div>}
+      </div>
       <div className="fire-prediction-box" style={{ marginTop: 12 }}>
         <strong>Burn Morel Potential:</strong> WA DNR jurisdiction fires on state-protected forests
         can produce excellent burn morels the following spring. Check for moderate-severity
