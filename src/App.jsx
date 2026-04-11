@@ -97,8 +97,8 @@ export const LAYERS = {
   },
   waDnrLands: {
     id: 'waDnrLands',
-    label: 'WA State Lands (DNR)',
-    description: 'Washington DNR state forests — free permit required for commercial, personal use OK',
+    label: 'WA State & County Lands',
+    description: 'DNR forests, state parks, county/regional parks — Tiger Mtn, Squak Mtn, Cougar Mtn, etc.',
     color: '#6d8b3a',
     defaultOn: false,
   },

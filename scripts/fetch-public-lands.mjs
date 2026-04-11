@@ -99,21 +99,20 @@ const DATASETS = [
   },
   {
     name: 'wa-dnr-lands',
-    label: 'WA DNR Lands',
+    label: 'WA State & County Public Lands',
     // gis.dnr.wa.gov blocks GitHub Actions; use ESRI Living Atlas USA_Protected_Areas_State
-    // which contains PAD-US state-managed lands (CORS-enabled on services.arcgis.com).
-    // PAD-US field: State_Nm = full state name; Mang_Name varies by agency.
-    // Try several where clauses — first success wins.
+    // which contains full PAD-US data: DNR forests, state parks, county/regional parks.
+    // Cougar Mountain (King County), Squak Mountain (WA State Parks), Tiger Mountain (DNR)
+    // all appear under State_Nm='Washington' — query broadly first, DNR-only as fallback.
     attempts: [
-      // Most specific: WA state-managed lands by state name + DNR manager
-      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='Washington' AND Mang_Name='WADNR'",   outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
-      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='Washington' AND Mang_Name='WA DNR'",  outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
-      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='WA' AND Mang_Name='WADNR'",           outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
-      // Broader: all WA state-managed lands (includes state parks, wildlife areas, etc.)
-      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='Washington'",                         outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
-      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='WA'",                                 outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
-      // Broadest: all state lands in PNW bbox (may include OR/ID state lands too)
-      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "1=1",                                           outFields: 'Unit_Nm,Des_Tp,Mang_Name,State_Nm,GIS_Acres' },
+      // Broadest WA filter first — catches DNR, State Parks, King County parks, etc.
+      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='Washington'", outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
+      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='WA'",        outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
+      // DNR-specific fallbacks
+      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='Washington' AND Mang_Name='WADNR'",  outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
+      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='Washington' AND Mang_Name='WA DNR'", outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
+      // Broadest: all state/local lands in PNW bbox (may include OR/ID)
+      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "1=1", outFields: 'Unit_Nm,Des_Tp,Mang_Name,State_Nm,GIS_Acres' },
     ],
   },
 ]
