@@ -101,10 +101,46 @@ async function downloadYear(year) {
   return null
 }
 
+// ── WADNR fire points (Layer 1 = Current DNR Fire Statistics) ────────────────
+
+const WADNR_URL = 'https://gis.dnr.wa.gov/site3/rest/services/Public_Wildfire/WADNR_PUBLIC_WD_WildFire_Data/MapServer/1/query'
+
+async function downloadWADNRFires(year) {
+  console.log(`\nFetching WADNR fire points for ${year}…`)
+  const queries = [
+    `FIRE_YEAR = ${year}`,
+    `FireYear = ${year}`,
+    `1=1`,
+  ]
+  for (const where of queries) {
+    const params = new URLSearchParams({
+      where,
+      outFields: '*',
+      f: 'geojson',
+      resultRecordCount: '2000',
+    })
+    try {
+      console.log(`  → ${where}`)
+      const res = await fetch(`${WADNR_URL}?${params}`, { signal: AbortSignal.timeout(30000) })
+      if (!res.ok) { console.log(`    HTTP ${res.status}`); continue }
+      const json = await res.json()
+      if (json.error) { console.log(`    API error: ${json.error.message}`); continue }
+      if (!json.features?.length) { console.log('    0 features'); continue }
+      console.log(`    ✓ ${json.features.length} features`)
+      return json
+    } catch (e) {
+      console.log(`    Error: ${e.message}`)
+    }
+  }
+  console.warn(`  ⚠ No WADNR data found for ${year}`)
+  return null
+}
+
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true })
   let anyFailed = false
 
+  // NIFC fire perimeters (polygons)
   for (const year of [2024, 2025]) {
     const outFile = join(OUT_DIR, `fires-${year}.geojson`)
     const data = await downloadYear(year)
@@ -119,6 +155,24 @@ async function main() {
       console.warn(`  Writing empty placeholder for fires-${year}.geojson`)
       writeFileSync(outFile, JSON.stringify({ type: 'FeatureCollection', features: [] }))
       anyFailed = true
+    }
+  }
+
+  // WADNR fire points (current season)
+  for (const year of [2025]) {
+    const outFile = join(OUT_DIR, `wadnr-fires-${year}.geojson`)
+    const data = await downloadWADNRFires(year)
+
+    if (data) {
+      writeFileSync(outFile, JSON.stringify(data))
+      const kb = Math.round(Buffer.byteLength(JSON.stringify(data)) / 1024)
+      console.log(`  Saved wadnr-fires-${year}.geojson (${data.features.length} features, ${kb} KB)`)
+    } else if (existsSync(outFile)) {
+      console.log(`  Keeping existing wadnr-fires-${year}.geojson`)
+    } else {
+      console.warn(`  Writing empty placeholder for wadnr-fires-${year}.geojson`)
+      writeFileSync(outFile, JSON.stringify({ type: 'FeatureCollection', features: [] }))
+      // WADNR failure is non-critical — don't set anyFailed
     }
   }
 

@@ -4,6 +4,7 @@ import LayerPanel from './components/LayerPanel.jsx'
 import InfoPanel from './components/InfoPanel.jsx'
 import Legend from './components/Legend.jsx'
 import { useFirePerimeters } from './hooks/useFirePerimeters.js'
+import { useWADNRFirePoints } from './hooks/useWADNRFirePoints.js'
 import { useSnotel } from './hooks/useSnotel.js'
 import { useInatObservations } from './hooks/useInatObservations.js'
 import './App.css'
@@ -100,6 +101,13 @@ export const LAYERS = {
     color: '#6d8b3a',
     defaultOn: false,
   },
+  wadnrFires: {
+    id: 'wadnrFires',
+    label: 'WA DNR Jurisdiction Fires (2025)',
+    description: 'Fire incidents on WA DNR-protected lands, current season',
+    color: '#FF4500',
+    defaultOn: true,
+  },
 }
 
 function buildDefaultVisibility() {
@@ -115,6 +123,7 @@ export default function App() {
 
   const { data: fires2024, loading: fires2024Loading } = useFirePerimeters(2024)
   const { data: fires2025, loading: fires2025Loading } = useFirePerimeters(2025)
+  const { data: wadnrFires } = useWADNRFirePoints(2025)
   const { data: snotelStations } = useSnotel()
   const { data: inatObs } = useInatObservations()
 
@@ -171,6 +180,7 @@ export default function App() {
             layerVis={layerVis}
             fires2024={fires2024}
             fires2025={fires2025}
+            wadnrFires={wadnrFires}
             snotelStations={snotelStations}
             inatObs={inatObs}
             onPointClick={handlePointClick}

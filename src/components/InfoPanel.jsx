@@ -341,9 +341,58 @@ function InatInfo({ obs }) {
 
 // ─── Main InfoPanel ───────────────────────────────────────────────────────────
 
+// ─── WADNR Fire Point Panel ───────────────────────────────────────────────────
+
+function WADNRFireInfo({ info }) {
+  const acresFormatted = info.acres != null
+    ? Number(info.acres).toLocaleString(undefined, { maximumFractionDigits: 0 })
+    : '?'
+  return (
+    <>
+      <div className="fire-info-name">{info.name}</div>
+      <div style={{ fontSize: 11, color: '#FF4500', marginBottom: 10, fontWeight: 600 }}>
+        WA DNR Jurisdiction Fire
+      </div>
+      <div className="fire-meta-grid">
+        <div className="fire-meta-item">
+          <div className="fire-meta-value">{info.year || 2025}</div>
+          <div className="fire-meta-key">Year</div>
+        </div>
+        <div className="fire-meta-item">
+          <div className="fire-meta-value">{acresFormatted}</div>
+          <div className="fire-meta-key">Acres</div>
+        </div>
+        {info.cause && (
+          <div className="fire-meta-item">
+            <div className="fire-meta-value" style={{ fontSize: 12 }}>{info.cause}</div>
+            <div className="fire-meta-key">Cause</div>
+          </div>
+        )}
+        {info.agency && (
+          <div className="fire-meta-item">
+            <div className="fire-meta-value" style={{ fontSize: 12 }}>{info.agency}</div>
+            <div className="fire-meta-key">Agency</div>
+          </div>
+        )}
+      </div>
+      {info.startDate && (
+        <div style={{ fontSize: 11, color: '#6e7681', marginTop: 6 }}>
+          Start date: {new Date(info.startDate).toLocaleDateString()}
+        </div>
+      )}
+      <div className="fire-prediction-box" style={{ marginTop: 12 }}>
+        <strong>Burn Morel Potential:</strong> WA DNR jurisdiction fires on state-protected forests
+        can produce excellent burn morels the following spring. Check for moderate-severity
+        burned areas in conifer forest when soil temps reach 50–55°F.
+      </div>
+    </>
+  )
+}
+
 const TITLES = {
   point: 'Soil Temperature',
   fire: 'Fire Perimeter',
+  wadnrFire: 'WA DNR Fire Incident',
   snotel: 'SNOTEL Station',
   inat: 'iNaturalist Sighting',
 }
@@ -360,6 +409,7 @@ export default function InfoPanel({ info, onClose }) {
       <div className="info-panel-body">
         {info?.type === 'point' && <SoilTempInfo lat={info.lat} lng={info.lng} />}
         {info?.type === 'fire' && <FireInfo info={info} />}
+        {info?.type === 'wadnrFire' && <WADNRFireInfo info={info} />}
         {info?.type === 'snotel' && <SnotelInfo station={info.station} />}
         {info?.type === 'inat' && <InatInfo obs={info.obs} />}
       </div>

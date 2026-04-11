@@ -300,6 +300,7 @@ export default function Map({
   layerVis,
   fires2024,
   fires2025,
+  wadnrFires,
   snotelStations,
   inatObs,
   onPointClick,
@@ -351,6 +352,24 @@ export default function Map({
     if (!m || !mapReady) return
 
     const handleClick = (e) => {
+      // Check WADNR fire points first (on top)
+      if (m.getLayer('wadnr-fires-circle')) {
+        const pts = m.queryRenderedFeatures(e.point, { layers: ['wadnr-fires-circle'] })
+        if (pts.length > 0) {
+          const p = pts[0].properties || {}
+          onFeatureClick({
+            type: 'wadnrFire',
+            name: p.FIRE_NAME || p.IncidentName || p.fireName || 'Unknown Fire',
+            acres: p.TOTAL_ACRES ?? p.GISAcres ?? p.TotalAcres ?? null,
+            year: p.FIRE_YEAR || p.FireYear || 2025,
+            cause: p.CAUSE || p.CauseGeneral || '',
+            agency: p.PROTECTION_AGENCY || p.Agency || 'WADNR',
+            startDate: p.START_DATE || p.DiscoveryDate || null,
+          })
+          return
+        }
+      }
+
       const fireLayers = [
         'fires-2024-fill',
         'fires-2025-fill',
@@ -379,7 +398,7 @@ export default function Map({
     const m = mapRef.current
     if (!m || !mapReady) return
 
-    const fireIds = ['fires-2024-fill', 'fires-2025-fill']
+    const fireIds = ['fires-2024-fill', 'fires-2025-fill', 'wadnr-fires-circle']
     const enter = () => { m.getCanvas().style.cursor = 'pointer' }
     const leave = () => { m.getCanvas().style.cursor = '' }
 
@@ -409,6 +428,69 @@ export default function Map({
     ensureFireLayer(m, 'fires-2025', fires2025, '#E63946', '#9B1B2A', 0.38)
   }, [mapReady, fires2025])
 
+  // ── WADNR fire points ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    const m = mapRef.current
+    if (!m || !mapReady || !wadnrFires) return
+    if (m.getSource('wadnr-fires')) {
+      m.getSource('wadnr-fires').setData(wadnrFires)
+      return
+    }
+    m.addSource('wadnr-fires', { type: 'geojson', data: wadnrFires })
+    // Halo
+    m.addLayer({
+      id: 'wadnr-fires-halo',
+      type: 'circle',
+      source: 'wadnr-fires',
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'],
+          6, 9, 10, 14,
+        ],
+        'circle-color': '#FF4500',
+        'circle-opacity': 0.25,
+      },
+    })
+    // Core dot — size scales with acres when available
+    m.addLayer({
+      id: 'wadnr-fires-circle',
+      type: 'circle',
+      source: 'wadnr-fires',
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'],
+          6, 5, 10, 9,
+        ],
+        'circle-color': '#FF4500',
+        'circle-stroke-color': '#8B1200',
+        'circle-stroke-width': 1.5,
+        'circle-opacity': 0.9,
+      },
+    })
+    // Label at zoom >= 10
+    m.addLayer({
+      id: 'wadnr-fires-label',
+      type: 'symbol',
+      source: 'wadnr-fires',
+      minzoom: 10,
+      layout: {
+        'text-field': ['coalesce',
+          ['get', 'FIRE_NAME'],
+          ['get', 'IncidentName'],
+          ['get', 'fireName'],
+          '',
+        ],
+        'text-size': 11,
+        'text-anchor': 'top',
+        'text-offset': [0, 0.8],
+        'text-max-width': 8,
+      },
+      paint: {
+        'text-color': '#FF4500',
+        'text-halo-color': '#000',
+        'text-halo-width': 1.5,
+      },
+    })
+  }, [mapReady, wadnrFires])
+
   // ── Layer visibility ──────────────────────────────────────────────────────────
   useEffect(() => {
     const m = mapRef.current
@@ -429,6 +511,9 @@ export default function Map({
     setVis(m, 'nat-parks-layer',    layerVis.natParks)
     setVis(m, 'blm-lands-layer',    layerVis.blmLands)
     setVis(m, 'wa-dnr-lands-layer', layerVis.waDnrLands)
+    setVis(m, 'wadnr-fires-halo',   layerVis.wadnrFires)
+    setVis(m, 'wadnr-fires-circle', layerVis.wadnrFires)
+    setVis(m, 'wadnr-fires-label',  layerVis.wadnrFires)
   }, [mapReady, layerVis])
 
   // ── SNOTEL markers ────────────────────────────────────────────────────────────
