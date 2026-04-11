@@ -434,35 +434,48 @@ export default function Map({
   }, [mapReady, wadnrFires])
 
   // ── Public lands vector layers ────────────────────────────────────────────────
+  // After ensurePublicLandLayer adds layers (with visibility:'none'), immediately apply
+  // the current layerVis state. This fixes a race condition where the visibility
+  // effect fires before GeoJSON loads, making the no-op setVis miss the window.
   useEffect(() => {
     const m = mapRef.current
     if (!m || !mapReady || !publicLands?.natForests) return
     ensurePublicLandLayer(m, 'nat-forests', publicLands.natForests, '#2d6a4f', '#1b4332', 0.22)
-  }, [mapReady, publicLands?.natForests])
+    setVis(m, 'nat-forests-fill', layerVis.natForests)
+    setVis(m, 'nat-forests-line', layerVis.natForests)
+  }, [mapReady, publicLands?.natForests])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const m = mapRef.current
     if (!m || !mapReady || !publicLands?.wilderness) return
     ensurePublicLandLayer(m, 'wilderness', publicLands.wilderness, '#1a3a5c', '#0d2137', 0.28)
-  }, [mapReady, publicLands?.wilderness])
+    setVis(m, 'wilderness-fill', layerVis.wilderness)
+    setVis(m, 'wilderness-line', layerVis.wilderness)
+  }, [mapReady, publicLands?.wilderness])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const m = mapRef.current
     if (!m || !mapReady || !publicLands?.natParks) return
     ensurePublicLandLayer(m, 'nat-parks', publicLands.natParks, '#7d3c0a', '#5a2906', 0.28)
-  }, [mapReady, publicLands?.natParks])
+    setVis(m, 'nat-parks-fill', layerVis.natParks)
+    setVis(m, 'nat-parks-line', layerVis.natParks)
+  }, [mapReady, publicLands?.natParks])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const m = mapRef.current
     if (!m || !mapReady || !publicLands?.blmLands) return
     ensurePublicLandLayer(m, 'blm-lands', publicLands.blmLands, '#c9a227', '#9a7a1c', 0.22)
-  }, [mapReady, publicLands?.blmLands])
+    setVis(m, 'blm-lands-fill', layerVis.blmLands)
+    setVis(m, 'blm-lands-line', layerVis.blmLands)
+  }, [mapReady, publicLands?.blmLands])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const m = mapRef.current
     if (!m || !mapReady || !publicLands?.waDnrLands) return
     ensurePublicLandLayer(m, 'wa-dnr-lands', publicLands.waDnrLands, '#6d8b3a', '#4a6028', 0.22)
-  }, [mapReady, publicLands?.waDnrLands])
+    setVis(m, 'wa-dnr-lands-fill', layerVis.waDnrLands)
+    setVis(m, 'wa-dnr-lands-line', layerVis.waDnrLands)
+  }, [mapReady, publicLands?.waDnrLands])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Layer visibility ──────────────────────────────────────────────────────────
   useEffect(() => {
