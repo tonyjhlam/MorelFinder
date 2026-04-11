@@ -98,11 +98,16 @@ const DATASETS = [
   {
     name: 'wa-dnr-lands',
     label: 'WA DNR Lands',
+    // gis.dnr.wa.gov blocks GitHub Actions — use PAD-US Living Atlas (services.arcgis.com, CORS-enabled)
+    // PAD-US fields: State_Nm, Mang_Name, Des_Tp, Unit_Nm, GIS_Acres
     urls: [
-      'https://gis.dnr.wa.gov/site3/rest/services/Public_Boundaries/WADNR_PUBLIC_Managed_Lands/MapServer/0/query',
-      'https://gis.dnr.wa.gov/site3/rest/services/Public_Boundaries/WADNR_PUBLIC_Cadastre_OpenData/MapServer/0/query',
+      'https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Protected_Areas_State/FeatureServer/0/query',
     ],
-    extra: { outFields: 'LABEL,MANAGING_AGENCY,ACRES' },
+    extra: {
+      where: "State_Nm='Washington' AND Mang_Name='WA DNR'",
+      outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres',
+      // Override bbox-based where with agency filter; still apply spatial filter
+    },
   },
 ]
 

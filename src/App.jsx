@@ -144,13 +144,6 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <button
-          className="sidebar-toggle"
-          onClick={() => setSidebarOpen(v => !v)}
-          aria-label="Toggle sidebar"
-        >
-          {sidebarOpen ? '◀' : '▶'}
-        </button>
         <span className="app-title">MorelFinder</span>
         <span className="app-subtitle">Western Washington Morel Prediction</span>
         <div className="header-status">
@@ -176,6 +169,7 @@ export default function App() {
           visibility={layerVis}
           onToggle={toggleLayer}
           isOpen={sidebarOpen}
+          onTogglePanel={() => setSidebarOpen(v => !v)}
         />
         <div className="map-wrapper">
           <Map

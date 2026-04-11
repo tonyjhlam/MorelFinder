@@ -96,6 +96,7 @@
 
 /* ─── Sidebar / Layer Panel ──────────────────────────────────── */
 .layer-panel {
+  position: relative;
   width: 260px;
   background: #161b22;
   border-right: 1px solid #30363d;
@@ -136,6 +137,47 @@
   color: #6e7681;
   padding: 4px 14px;
 }
+
+.layer-group-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.layer-group-toggle:hover { color: #8b949e; }
+
+.group-chevron {
+  font-size: 10px;
+  color: #6e7681;
+  padding-right: 14px;
+}
+
+/* Floating tab on the right edge of the panel — always visible */
+.panel-tab {
+  position: absolute;
+  right: -22px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 48px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  color: #8b949e;
+  font-size: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  transition: color 0.2s, border-color 0.2s;
+}
+.panel-tab:hover { color: #e6edf3; border-color: #58a6ff; }
 
 .layer-item {
   display: flex;
