@@ -103,15 +103,13 @@ async function downloadYear(year) {
 
 // ── WADNR fire points (Layer 1 = Current DNR Fire Statistics) ────────────────
 
-const WADNR_URL = 'https://gis.dnr.wa.gov/site3/rest/services/Public_Wildfire/WADNR_PUBLIC_WD_WildFire_Data/MapServer/1/query'
+// Public FeatureServer confirmed: services.arcgis.com/4x406oNViizbGo13
+const WADNR_URL = 'https://services.arcgis.com/4x406oNViizbGo13/arcgis/rest/services/WADNR_Jurisdiction_Fire_Points_2025/FeatureServer/0/query'
 
 async function downloadWADNRFires(year) {
   console.log(`\nFetching WADNR fire points for ${year}…`)
-  const queries = [
-    `FIRE_YEAR = ${year}`,
-    `FireYear = ${year}`,
-    `1=1`,
-  ]
+  // Single-year service — no year filter needed
+  const queries = [`1=1`]
   for (const where of queries) {
     const params = new URLSearchParams({
       where,

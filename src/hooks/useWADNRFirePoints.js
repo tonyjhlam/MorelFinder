@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react'
 
-// WADNR Public Wildfire MapServer:
-// Layer 0 = Washington Large Fires 1973-2025 (polygons, history)
-// Layer 1 = Current DNR Fire Statistics (points, current year — "Jurisdiction Fires by Point")
-const WADNR_URL = 'https://gis.dnr.wa.gov/site3/rest/services/Public_Wildfire/WADNR_PUBLIC_WD_WildFire_Data/MapServer/1/query'
+// WADNR Jurisdiction Fire Points 2025 — public ArcGIS Online FeatureServer
+const WADNR_URL = 'https://services.arcgis.com/4x406oNViizbGo13/arcgis/rest/services/WADNR_Jurisdiction_Fire_Points_2025/FeatureServer/0/query'
 
 async function loadStaticFile(year) {
   const base = import.meta.env.BASE_URL ?? '/'
@@ -21,11 +19,9 @@ async function loadStaticFile(year) {
   }
 }
 
-async function fetchLive(year) {
+async function fetchLive() {
   const queries = [
-    `FIRE_YEAR = ${year}`,
-    `FireYear = ${year}`,
-    `1=1`, // fallback: all current records
+    `1=1`, // single-year service — all records are 2025
   ]
   for (const where of queries) {
     try {
@@ -64,7 +60,7 @@ export function useWADNRFirePoints(year) {
         if (!cancelled) { setData(staticData); setLoading(false) }
         return
       }
-      const liveData = await fetchLive(year)
+      const liveData = await fetchLive()
       if (!cancelled) { setData(liveData); setLoading(false) }
     })()
 
