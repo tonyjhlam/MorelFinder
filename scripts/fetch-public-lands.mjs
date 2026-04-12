@@ -61,70 +61,9 @@ async function tryAttempts(attempts) {
 }
 
 // ─── Overpass / OpenStreetMap helper ────────────────────────────────────────
-// Overpass is the most reliable fallback: no auth, global coverage, includes
-// county parks (Cougar Mountain), state parks (Squak Mountain), DNR forests
-// (Tiger Mountain) — all in one query.
-
-function osmToGeoJSON(osmJson) {
-  const features = []
-
-  function makeRing(geomArray) {
-    if (!geomArray || geomArray.length < 3) return null
-    const coords = geomArray.map(p => [p.lon, p.lat])
-    // Close the ring if not already closed
-    const first = coords[0], last = coords[coords.length - 1]
-    if (first[0] !== last[0] || first[1] !== last[1]) coords.push(first)
-    return coords.length >= 4 ? coords : null
-  }
-
-  for (const el of (osmJson.elements || [])) {
-    let geometry = null
-    const tags = el.tags || {}
-    const name = tags.name || tags['name:en'] || null
-    if (!name) continue // skip unnamed features
-
-    if (el.type === 'way' && el.geometry) {
-      // A closed way = polygon
-      const ring = makeRing(el.geometry)
-      if (ring) geometry = { type: 'Polygon', coordinates: [ring] }
-
-    } else if (el.type === 'relation') {
-      // Collect outer and inner member ways (members get geometry via `out geom`)
-      const outerWays = (el.members || []).filter(m => m.type === 'way' && m.role !== 'inner' && m.geometry)
-      const innerWays = (el.members || []).filter(m => m.type === 'way' && m.role === 'inner' && m.geometry)
-      if (outerWays.length === 0) continue
-
-      // Stitch outer ways into one ring (simplified — concatenates in order)
-      const outerCoords = outerWays.flatMap(m => m.geometry).map(p => [p.lon, p.lat])
-      if (outerCoords.length < 3) continue
-      const first = outerCoords[0], last = outerCoords[outerCoords.length - 1]
-      if (first[0] !== last[0] || first[1] !== last[1]) outerCoords.push(first)
-      if (outerCoords.length < 4) continue
-
-      const rings = [outerCoords]
-      for (const m of innerWays) {
-        const inner = makeRing(m.geometry)
-        if (inner) rings.push(inner)
-      }
-      geometry = { type: 'Polygon', coordinates: rings }
-    }
-
-    if (geometry) {
-      features.push({
-        type: 'Feature',
-        properties: {
-          name,
-          designation: tags.designation || tags.protect_class || null,
-          operator: tags.operator || null,
-          osm_id: el.id,
-        },
-        geometry,
-      })
-    }
-  }
-
-  return { type: 'FeatureCollection', features }
-}
+// Using [out:geojson] so the Overpass API returns a proper GeoJSON
+// FeatureCollection directly — no manual OSM→GeoJSON conversion needed.
+// Relations become MultiPolygons with correctly-stitched member rings.
 
 async function tryOverpass(query) {
   console.log(`  → Overpass API (OpenStreetMap)`)
@@ -136,9 +75,8 @@ async function tryOverpass(query) {
       signal: AbortSignal.timeout(90000),
     })
     if (!res.ok) { console.log(`    ✗ HTTP ${res.status}`); return null }
-    const json = await res.json()
-    const geojson = osmToGeoJSON(json)
-    if (!geojson.features.length) { console.log('    ✗ 0 features'); return null }
+    const geojson = await res.json()
+    if (!geojson.features?.length) { console.log('    ✗ 0 features'); return null }
     console.log(`    ✓ ${geojson.features.length} features (OSM)`)
     return geojson
   } catch (e) {
@@ -153,8 +91,12 @@ async function tryOverpass(query) {
 const LIVING_ATLAS = 'https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services'
 
 // Overpass queries — bbox is (lat_min,lon_min,lat_max,lon_max) — WA state only
+// [out:geojson] makes Overpass return a proper GeoJSON FeatureCollection.
+// Relations are automatically converted to (Multi)Polygon with correctly
+// stitched member ways — no manual conversion needed.
+
 const WA_PARKS_OVERPASS = `
-[out:json][timeout:90];
+[out:geojson][timeout:90];
 (
   way["boundary"="protected_area"]["name"](${WA_BBOX_OVERPASS});
   way["leisure"="nature_reserve"]["name"](${WA_BBOX_OVERPASS});
@@ -167,7 +109,7 @@ out geom;
 `
 
 const PNW_FORESTS_OVERPASS = `
-[out:json][timeout:90];
+[out:geojson][timeout:90];
 (
   way["boundary"="national_forest"](${WA_BBOX_OVERPASS});
   way["operator"="US Forest Service"]["boundary"="protected_area"](${WA_BBOX_OVERPASS});
