@@ -3,4 +3,7 @@ dist/
 .env
 .env.local
 *.local
-public/data/
+# GeoJSON files are re-downloaded at CI build time — don't commit stale data
+public/data/*.geojson
+# KML exports are committed so users can download them directly from the repo
+

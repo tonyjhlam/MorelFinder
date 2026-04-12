@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # needed to commit KML back to repo
   pages: write
   id-token: write
 
@@ -37,6 +37,15 @@ jobs:
 
       - name: Generate Google Maps KML (WADNR fires 2025)
         run: node scripts/generate-fire-kml.mjs
+        continue-on-error: true
+
+      - name: Commit KML to repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f public/data/wadnr-fires-2025.kml 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "Update wadnr-fires-2025.kml [skip ci]"
+          git push origin main || true
         continue-on-error: true
 
       - run: npm run build
