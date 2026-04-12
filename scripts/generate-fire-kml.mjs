@@ -35,6 +35,13 @@ function fmtDate(ts) {
   catch { return String(ts) }
 }
 
+function fmtAcres(v) {
+  if (v == null) return ''
+  const n = parseFloat(v)
+  if (isNaN(n)) return escapeXml(v)
+  return n.toLocaleString('en-US', { maximumFractionDigits: 1 })
+}
+
 // Acre-based style tiers — icon color + scale both increase with fire size
 const STYLES = [
   { id: 'fire-unknown', label: 'Unknown size',    icon: 'ltblue-dot', scale: 0.7 },
