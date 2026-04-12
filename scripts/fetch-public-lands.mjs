@@ -11,7 +11,7 @@
  *   wilderness.geojson        — USFS Wilderness Areas
  *   national-parks.geojson    — NPS units (parks, monuments, recreation areas)
  *   blm-lands.geojson         — BLM Surface Management Agency
- *   wa-dnr-lands.geojson      — WA state-managed lands (DNR state forests)
+ *   wa-dnr-lands.geojson      — WA state + county public lands (DNR, State Parks, King County, etc.)
  */
 
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
@@ -21,12 +21,15 @@ import { fileURLToPath } from 'url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const OUT_DIR = join(__dirname, '..', 'public', 'data')
 
-// PNW bounding box (WGS84)
+// PNW bounding box (WGS84) — used for ArcGIS queries
 const BBOX = { xmin: -126, ymin: 44, xmax: -115, ymax: 50 }
 
-// Each attempt = { url, where?, outFields? }
-// The function tries each in order, returning first success.
-async function tryAttempts(attempts, label) {
+// Washington State bounds for Overpass (tighter than full PNW)
+const WA_BBOX_OVERPASS = '45.54,-124.8,49.1,-116.9' // lat_min,lon_min,lat_max,lon_max
+
+// ─── ArcGIS REST helper ──────────────────────────────────────────────────────
+
+async function tryAttempts(attempts) {
   for (const { url, where = '1=1', outFields = '*', extra = {} } of attempts) {
     const params = new URLSearchParams({
       where,
@@ -42,7 +45,7 @@ async function tryAttempts(attempts, label) {
     })
     try {
       const shortUrl = url.replace(/^https?:\/\/[^/]+/, '')
-      console.log(`  → ${shortUrl} | ${where.slice(0, 50)}`)
+      console.log(`  → ArcGIS ${shortUrl.slice(0, 60)} | ${where.slice(0, 50)}`)
       const res = await fetch(`${url}?${params}`, { signal: AbortSignal.timeout(30000) })
       if (!res.ok) { console.log(`    ✗ HTTP ${res.status}`); continue }
       const json = await res.json()
@@ -57,19 +60,134 @@ async function tryAttempts(attempts, label) {
   return null
 }
 
+// ─── Overpass / OpenStreetMap helper ────────────────────────────────────────
+// Overpass is the most reliable fallback: no auth, global coverage, includes
+// county parks (Cougar Mountain), state parks (Squak Mountain), DNR forests
+// (Tiger Mountain) — all in one query.
+
+function osmToGeoJSON(osmJson) {
+  const features = []
+
+  function makeRing(geomArray) {
+    if (!geomArray || geomArray.length < 3) return null
+    const coords = geomArray.map(p => [p.lon, p.lat])
+    // Close the ring if not already closed
+    const first = coords[0], last = coords[coords.length - 1]
+    if (first[0] !== last[0] || first[1] !== last[1]) coords.push(first)
+    return coords.length >= 4 ? coords : null
+  }
+
+  for (const el of (osmJson.elements || [])) {
+    let geometry = null
+    const tags = el.tags || {}
+    const name = tags.name || tags['name:en'] || null
+    if (!name) continue // skip unnamed features
+
+    if (el.type === 'way' && el.geometry) {
+      // A closed way = polygon
+      const ring = makeRing(el.geometry)
+      if (ring) geometry = { type: 'Polygon', coordinates: [ring] }
+
+    } else if (el.type === 'relation') {
+      // Collect outer and inner member ways (members get geometry via `out geom`)
+      const outerWays = (el.members || []).filter(m => m.type === 'way' && m.role !== 'inner' && m.geometry)
+      const innerWays = (el.members || []).filter(m => m.type === 'way' && m.role === 'inner' && m.geometry)
+      if (outerWays.length === 0) continue
+
+      // Stitch outer ways into one ring (simplified — concatenates in order)
+      const outerCoords = outerWays.flatMap(m => m.geometry).map(p => [p.lon, p.lat])
+      if (outerCoords.length < 3) continue
+      const first = outerCoords[0], last = outerCoords[outerCoords.length - 1]
+      if (first[0] !== last[0] || first[1] !== last[1]) outerCoords.push(first)
+      if (outerCoords.length < 4) continue
+
+      const rings = [outerCoords]
+      for (const m of innerWays) {
+        const inner = makeRing(m.geometry)
+        if (inner) rings.push(inner)
+      }
+      geometry = { type: 'Polygon', coordinates: rings }
+    }
+
+    if (geometry) {
+      features.push({
+        type: 'Feature',
+        properties: {
+          name,
+          designation: tags.designation || tags.protect_class || null,
+          operator: tags.operator || null,
+          osm_id: el.id,
+        },
+        geometry,
+      })
+    }
+  }
+
+  return { type: 'FeatureCollection', features }
+}
+
+async function tryOverpass(query) {
+  console.log(`  → Overpass API (OpenStreetMap)`)
+  try {
+    const res = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `data=${encodeURIComponent(query)}`,
+      signal: AbortSignal.timeout(90000),
+    })
+    if (!res.ok) { console.log(`    ✗ HTTP ${res.status}`); return null }
+    const json = await res.json()
+    const geojson = osmToGeoJSON(json)
+    if (!geojson.features.length) { console.log('    ✗ 0 features'); return null }
+    console.log(`    ✓ ${geojson.features.length} features (OSM)`)
+    return geojson
+  } catch (e) {
+    console.log(`    ✗ ${e.message}`)
+    return null
+  }
+}
+
+// ─── Dataset definitions ─────────────────────────────────────────────────────
+
 // ESRI Living Atlas org — CORS-enabled, publicly accessible
 const LIVING_ATLAS = 'https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services'
+
+// Overpass queries — bbox is (lat_min,lon_min,lat_max,lon_max) — WA state only
+const WA_PARKS_OVERPASS = `
+[out:json][timeout:90];
+(
+  way["boundary"="protected_area"]["name"](${WA_BBOX_OVERPASS});
+  way["leisure"="nature_reserve"]["name"](${WA_BBOX_OVERPASS});
+  way["boundary"="national_park"]["name"](${WA_BBOX_OVERPASS});
+  relation["boundary"="protected_area"]["name"](${WA_BBOX_OVERPASS});
+  relation["leisure"="nature_reserve"]["name"](${WA_BBOX_OVERPASS});
+  relation["boundary"="national_park"]["name"](${WA_BBOX_OVERPASS});
+);
+out geom;
+`
+
+const PNW_FORESTS_OVERPASS = `
+[out:json][timeout:90];
+(
+  way["boundary"="national_forest"](${WA_BBOX_OVERPASS});
+  way["operator"="US Forest Service"]["boundary"="protected_area"](${WA_BBOX_OVERPASS});
+  relation["boundary"="national_forest"](${WA_BBOX_OVERPASS});
+  relation["operator"="US Forest Service"]["boundary"="protected_area"](${WA_BBOX_OVERPASS});
+);
+out geom;
+`
 
 const DATASETS = [
   {
     name: 'national-forests',
     label: 'National Forests',
     attempts: [
-      { url: `${LIVING_ATLAS}/USA_Federal_Lands/FeatureServer/0/query`, where: "ADMIN_AGENCY_CODE='FS' AND STATE='WA'", outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,GIS_ACRES' },
       { url: `${LIVING_ATLAS}/USA_Federal_Lands/FeatureServer/0/query`, where: "ADMIN_AGENCY_CODE='FS'", outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,GIS_ACRES' },
+      { url: 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_ForestSystemBoundaries_01/FeatureServer/0/query', outFields: 'FORESTNAME,REGION,GIS_ACRES' },
       { url: 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_ForestSystemBoundaries_01/FeatureServer/1/query', outFields: 'FORESTNAME,REGION,GIS_ACRES' },
       { url: 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_ForestSystemBoundaries_01/MapServer/1/query', outFields: 'FORESTNAME,REGION,GIS_ACRES' },
     ],
+    overpassQuery: PNW_FORESTS_OVERPASS,
   },
   {
     name: 'wilderness',
@@ -77,7 +195,7 @@ const DATASETS = [
     attempts: [
       { url: 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_Wilderness_01/FeatureServer/0/query', outFields: 'NAME,AREAID,GIS_ACRES' },
       { url: 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_Wilderness_01/MapServer/0/query', outFields: 'NAME,AREAID,GIS_ACRES' },
-      { url: `${LIVING_ATLAS}/USA_Federal_Lands/FeatureServer/0/query`, where: "DESIGNATION='Wilderness'", outFields: 'ADMIN_UNIT_NAME,DESIGNATION,GIS_ACRES' },
+      { url: `${LIVING_ATLAS}/USA_Federal_Lands/FeatureServer/0/query`, where: "ADMIN_AGENCY_CODE='FS' AND DESIGNATION='Wilderness'", outFields: 'ADMIN_UNIT_NAME,DESIGNATION,GIS_ACRES' },
     ],
   },
   {
@@ -100,22 +218,24 @@ const DATASETS = [
   {
     name: 'wa-dnr-lands',
     label: 'WA State & County Public Lands',
-    // gis.dnr.wa.gov blocks GitHub Actions; use ESRI Living Atlas USA_Protected_Areas_State
-    // which contains full PAD-US data: DNR forests, state parks, county/regional parks.
-    // Cougar Mountain (King County), Squak Mountain (WA State Parks), Tiger Mountain (DNR)
-    // all appear under State_Nm='Washington' — query broadly first, DNR-only as fallback.
+    // Primary: ESRI Living Atlas PAD-US (state-managed lands)
+    // Fallback: OpenStreetMap via Overpass — comprehensive, includes county parks
+    //   Cougar Mountain (King County), Squak Mountain (WA State Parks),
+    //   Tiger Mountain (WA DNR) — all tagged boundary=protected_area in OSM
     attempts: [
-      // Broadest WA filter first — catches DNR, State Parks, King County parks, etc.
+      // USA_Protected_Areas_State = PAD-US state-managed lands
       { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='Washington'", outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
       { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='WA'",        outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
-      // DNR-specific fallbacks
-      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='Washington' AND Mang_Name='WADNR'",  outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
-      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='Washington' AND Mang_Name='WA DNR'", outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
-      // Broadest: all state/local lands in PNW bbox (may include OR/ID)
+      // USA_Protected_Areas_Local = PAD-US local/county government lands (Cougar Mtn)
+      { url: `${LIVING_ATLAS}/USA_Protected_Areas_Local/FeatureServer/0/query`,  where: "State_Nm='Washington'", outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
+      // Broader fallbacks
       { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "1=1", outFields: 'Unit_Nm,Des_Tp,Mang_Name,State_Nm,GIS_Acres' },
     ],
+    overpassQuery: WA_PARKS_OVERPASS,
   },
 ]
+
+// ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true })
@@ -123,7 +243,13 @@ async function main() {
   for (const ds of DATASETS) {
     console.log(`\nFetching ${ds.label}…`)
     const outFile = join(OUT_DIR, `${ds.name}.geojson`)
-    const data = await tryAttempts(ds.attempts, ds.label)
+
+    let data = await tryAttempts(ds.attempts)
+
+    // If ArcGIS attempts all failed, try Overpass (OpenStreetMap)
+    if (!data && ds.overpassQuery) {
+      data = await tryOverpass(ds.overpassQuery)
+    }
 
     if (data) {
       writeFileSync(outFile, JSON.stringify(data))
