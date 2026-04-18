@@ -135,10 +135,16 @@ function SoilTempInfo({ lat, lng }) {
 
 // ─── Fire Info Panel ─────────────────────────────────────────────────────────
 
+function formatAcres(acres) {
+  if (acres == null) return '?'
+  return Number(acres).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+}
+
 function FireInfo({ info }) {
-  const acresFormatted = info.acres
-    ? Number(info.acres).toLocaleString(undefined, { maximumFractionDigits: 0 })
-    : '?'
+  const acresFormatted = formatAcres(info.acres)
 
   return (
     <>
@@ -351,9 +357,7 @@ function InatInfo({ obs }) {
 // ─── WADNR Fire Point Panel ───────────────────────────────────────────────────
 
 function WADNRFireInfo({ info }) {
-  const acresFormatted = info.acres != null
-    ? Number(info.acres).toLocaleString(undefined, { maximumFractionDigits: 0 })
-    : '?'
+  const acresFormatted = formatAcres(info.acres)
   const gps = formatGps(info.lat, info.lng)
   return (
     <>

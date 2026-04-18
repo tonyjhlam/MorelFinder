@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { getNotableFire } from '../utils/colors.js'
 
 // Western Washington center, zoom
 const CENTER = [-122.1, 47.5]
@@ -36,161 +35,92 @@ function pointCoordinates(feature) {
   return { lng, lat }
 }
 
-// ─── WMS / WMTS helper ──────────────────────────────────────────────────────
-
-function makeTileUrl(base, wmsParams) {
-  const p = new URLSearchParams({
-    SERVICE: 'WMS',
-    VERSION: '1.3.0',
-    REQUEST: 'GetMap',
-    FORMAT: 'image/png',
-    TRANSPARENT: 'true',
-    CRS: 'EPSG:3857',
-    STYLES: '',
-    WIDTH: '256',
-    HEIGHT: '256',
-    BBOX: '{bbox-epsg-3857}',
-    ...wmsParams,
-  })
-  return `${base}?${p.toString()}`
-}
-
-function addWMSLayers(map) {
-  const yesterday = new Date()
-  yesterday.setDate(yesterday.getDate() - 1)
-  const dateStr = yesterday.toISOString().split('T')[0]
-
-  // SNODAS Snow Water Equivalent (layer 1 = SWE)
-  map.addSource('snodas', {
-    type: 'raster',
-    tiles: [
-      makeTileUrl(
-        'https://mapservices.weather.noaa.gov/raster/rest/services/snow/NOHRSC_Snow_Analysis/MapServer/WMSServer',
-        { LAYERS: '1' },
-      ),
-    ],
-    tileSize: 256,
-    attribution: 'NOAA SNODAS',
-  })
-  map.addLayer({
-    id: 'snodas-layer',
-    type: 'raster',
-    source: 'snodas',
-    paint: { 'raster-opacity': 0.65 },
-    layout: { visibility: 'none' },
-  })
-
-  // NASA GIBS MODIS Snow Cover (WMTS tile template)
-  map.addSource('modis-snow', {
-    type: 'raster',
-    tiles: [
-      `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_NDSI_Snow_Cover/default/${dateStr}/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png`,
-    ],
-    tileSize: 256,
-    attribution: 'NASA GIBS / MODIS',
-  })
-  map.addLayer({
-    id: 'modis-snow-layer',
-    type: 'raster',
-    source: 'modis-snow',
-    paint: { 'raster-opacity': 0.7 },
-    layout: { visibility: 'none' },
-  })
-
-  // LANDFIRE Existing Vegetation Type (EVT)
-  map.addSource('landfire', {
-    type: 'raster',
-    tiles: [
-      makeTileUrl(
-        'https://edcintl.cr.usgs.gov/geoserver/landfire/conus_2024/ows',
-        { LAYERS: 'LC24_EVT_240' },
-      ),
-    ],
-    tileSize: 256,
-    attribution: 'LANDFIRE / USGS',
-  })
-  map.addLayer({
-    id: 'landfire-layer',
-    type: 'raster',
-    source: 'landfire',
-    paint: { 'raster-opacity': 0.6 },
-    layout: { visibility: 'none' },
-  })
-
-  // NOAA RFC QPE 7-day precipitation
-  map.addSource('noaa-qpe', {
-    type: 'raster',
-    tiles: [
-      makeTileUrl(
-        'https://mapservices.weather.noaa.gov/raster/rest/services/obs/rfc_qpe/MapServer/WMSServer',
-        { LAYERS: '7' }, // layer 7 = 7-day accumulated
-      ),
-    ],
-    tileSize: 256,
-    attribution: 'NOAA RFC QPE',
-  })
-  map.addLayer({
-    id: 'noaa-qpe-layer',
-    type: 'raster',
-    source: 'noaa-qpe',
-    paint: { 'raster-opacity': 0.6 },
-    layout: { visibility: 'none' },
-  })
-
-  // Public lands are now GeoJSON vector layers loaded via usePublicLands hook.
-  // WMS removed — government WMS servers block cross-origin browser requests.
-}
-
-// ─── Fire layer helpers ──────────────────────────────────────────────────────
-
-function ensureFireLayer(map, id, geojson, fillColor, outlineColor, fillOpacity) {
-  if (map.getSource(id)) {
-    map.getSource(id).setData(geojson)
-    return
+function pointInRing(point, ring) {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i]
+    const [xj, yj] = ring[j]
+    const intersects = ((yi > point[1]) !== (yj > point[1]))
+      && (point[0] < ((xj - xi) * (point[1] - yi)) / ((yj - yi) || Number.EPSILON) + xi)
+    if (intersects) inside = !inside
   }
-  map.addSource(id, { type: 'geojson', data: geojson })
-  map.addLayer({
-    id: `${id}-fill`,
-    type: 'fill',
-    source: id,
-    paint: {
-      'fill-color': fillColor,
-      'fill-opacity': fillOpacity,
-    },
+  return inside
+}
+
+function ringBbox(ring) {
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+
+  ring.forEach(([x, y]) => {
+    minX = Math.min(minX, x)
+    minY = Math.min(minY, y)
+    maxX = Math.max(maxX, x)
+    maxY = Math.max(maxY, y)
   })
-  map.addLayer({
-    id: `${id}-outline`,
-    type: 'line',
-    source: id,
-    paint: {
-      'line-color': outlineColor,
-      'line-width': ['interpolate', ['linear'], ['zoom'], 6, 1, 12, 2.5],
-    },
+
+  return { minX, minY, maxX, maxY }
+}
+
+function flattenPublicLandAreas(publicLands) {
+  const collections = [
+    publicLands?.natForests,
+    publicLands?.wilderness,
+    publicLands?.natParks,
+    publicLands?.blmLands,
+    publicLands?.waDnrLands,
+  ].filter(Boolean)
+
+  return collections.flatMap(collection => (collection.features || []).flatMap(feature => {
+    const geometry = feature?.geometry
+    if (!geometry) return []
+
+    const polygons = geometry.type === 'Polygon'
+      ? [geometry.coordinates]
+      : geometry.type === 'MultiPolygon'
+        ? geometry.coordinates
+        : []
+
+    return polygons
+      .filter(rings => Array.isArray(rings) && rings.length > 0)
+      .map(rings => ({
+        outer: rings[0],
+        holes: rings.slice(1),
+        bbox: ringBbox(rings[0]),
+      }))
+  }))
+}
+
+function pointInPublicLand(point, areas) {
+  if (!Array.isArray(point) || point.length < 2) return false
+
+  return areas.some(area => {
+    const { minX, minY, maxX, maxY } = area.bbox
+    if (point[0] < minX || point[0] > maxX || point[1] < minY || point[1] > maxY) return false
+    if (!pointInRing(point, area.outer)) return false
+    return !area.holes.some(hole => pointInRing(point, hole))
   })
-  // Labels for notable fires at zoom >= 9
-  map.addLayer({
-    id: `${id}-label`,
-    type: 'symbol',
-    source: id,
-    minzoom: 9,
-    layout: {
-      'text-field': [
-        'coalesce',
-        ['get', 'attr_IncidentName'],
-        ['get', 'IncidentName'],
-        ['get', 'FIRE_NAME'],
-        '',
-      ],
-      'text-size': 11,
-      'text-anchor': 'center',
-      'text-max-width': 8,
-    },
-    paint: {
-      'text-color': '#fff',
-      'text-halo-color': '#000',
-      'text-halo-width': 1.5,
-    },
+}
+
+function prepareWadnrFireSourceData(wadnrFires, publicLands, publicOnly) {
+  if (!wadnrFires) return null
+
+  const publicLandAreas = flattenPublicLandAreas(publicLands)
+  const features = (wadnrFires.features || []).flatMap(feature => {
+    const isPublicLand = pointInPublicLand(feature?.geometry?.coordinates, publicLandAreas)
+    if (publicOnly && !isPublicLand) return []
+
+    return [{
+      ...feature,
+      properties: {
+        ...feature.properties,
+        IS_PUBLIC_LAND: isPublicLand ? 1 : 0,
+      },
+    }]
   })
+
+  return { ...wadnrFires, features }
 }
 
 function setVis(map, layerId, visible) {
@@ -227,38 +157,18 @@ function ensurePublicLandLayer(map, id, geojson, fillColor, lineColor, fillOpaci
   })
 }
 
-// ─── Fire property normalization ─────────────────────────────────────────────
-
-function fireProps(properties) {
-  const p = properties || {}
-  return {
-    name: p.attr_IncidentName || p.IncidentName || p.FIRE_NAME || p.fireName || 'Unknown Fire',
-    acres: p.attr_TotalAcres || p.GISAcres || p.GISACRES || p.totalAcres || null,
-    year: p.attr_FireYear || p.FireYear || p.FIRE_YEAR || p.fireYear || null,
-    pct: p.attr_PercentContained ?? p.PercentContained ?? null,
-    state: p.attr_POOState || p.POOState || '',
-    county: p.attr_POOCounty || p.POOCounty || '',
-    containedDate: p.attr_ContainmentDateTime || p.ContainmentDateTime || null,
-  }
-}
-
 // ─── Map component ───────────────────────────────────────────────────────────
 
 export default function Map({
   layerVis,
-  fires2024,
-  fires2025,
   wadnrFires,
   publicLands,
-  snotelStations,
-  inatObs,
+  showPublicLandFiresOnly,
   onPointClick,
   onFeatureClick,
 }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
-  const snotelMarkersRef = useRef([])
-  const inatMarkersRef = useRef([])
   const [mapReady, setMapReady] = useState(false)
 
   // ── Init map ────────────────────────────────────────────────────────────────
@@ -284,7 +194,6 @@ export default function Map({
     )
 
     m.on('load', () => {
-      addWMSLayers(m)
       setMapReady(true)
     })
 
@@ -327,21 +236,6 @@ export default function Map({
         }
       }
 
-      const fireLayers = [
-        'fires-2024-fill',
-        'fires-2025-fill',
-      ].filter(id => m.getLayer(id))
-
-      if (fireLayers.length > 0) {
-        const features = m.queryRenderedFeatures(e.point, { layers: fireLayers })
-        if (features.length > 0) {
-          const props = fireProps(features[0].properties)
-          const notable = getNotableFire(props.name)
-          onFeatureClick({ type: 'fire', ...props, notable })
-          return
-        }
-      }
-
       // Generic point click → soil temperature
       onPointClick({ type: 'point', lat: e.lngLat.lat, lng: e.lngLat.lng })
     }
@@ -355,7 +249,7 @@ export default function Map({
     const m = mapRef.current
     if (!m || !mapReady) return
 
-    const fireIds = ['fires-2024-fill', 'fires-2025-fill', 'wadnr-fires-circle']
+    const fireIds = ['wadnr-fires-circle']
     const enter = () => { m.getCanvas().style.cursor = 'pointer' }
     const leave = () => { m.getCanvas().style.cursor = '' }
 
@@ -371,29 +265,18 @@ export default function Map({
     }
   }, [mapReady])
 
-  // ── Fire 2024 perimeters ──────────────────────────────────────────────────────
-  useEffect(() => {
-    const m = mapRef.current
-    if (!m || !mapReady || !fires2024) return
-    ensureFireLayer(m, 'fires-2024', fires2024, '#FF8C00', '#C85C00', 0.32)
-  }, [mapReady, fires2024])
-
-  // ── Fire 2025 perimeters ──────────────────────────────────────────────────────
-  useEffect(() => {
-    const m = mapRef.current
-    if (!m || !mapReady || !fires2025) return
-    ensureFireLayer(m, 'fires-2025', fires2025, '#E63946', '#9B1B2A', 0.38)
-  }, [mapReady, fires2025])
-
   // ── WADNR fire points ─────────────────────────────────────────────────────────
   useEffect(() => {
     const m = mapRef.current
     if (!m || !mapReady || !wadnrFires) return
+    const wadnrFireData = prepareWadnrFireSourceData(wadnrFires, publicLands, showPublicLandFiresOnly)
+    const acresExpr = ['coalesce', ['to-number', ['get', 'ACRES_BURN']], 0]
+
     if (m.getSource('wadnr-fires')) {
-      m.getSource('wadnr-fires').setData(wadnrFires)
+      m.getSource('wadnr-fires').setData(wadnrFireData)
       return
     }
-    m.addSource('wadnr-fires', { type: 'geojson', data: wadnrFires })
+    m.addSource('wadnr-fires', { type: 'geojson', data: wadnrFireData })
     // Halo
     m.addLayer({
       id: 'wadnr-fires-halo',
@@ -401,22 +284,38 @@ export default function Map({
       source: 'wadnr-fires',
       paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'],
-          6, 9, 10, 14,
+          6, ['interpolate', ['linear'], acresExpr, 0, 8, 10, 9, 100, 10, 1000, 12, 5000, 15],
+          10, ['interpolate', ['linear'], acresExpr, 0, 12, 10, 14, 100, 16, 1000, 20, 5000, 24],
         ],
-        'circle-color': '#FF4500',
+        'circle-color': ['interpolate', ['linear'], acresExpr,
+          0, '#ffd166',
+          10, '#ffb347',
+          100, '#ff7f50',
+          500, '#f95d6a',
+          2000, '#d7263d',
+          10000, '#7f1d1d',
+        ],
         'circle-opacity': 0.25,
       },
     })
-    // Core dot — size scales with acres when available
+    // Core dot — size and color scale with acres burned
     m.addLayer({
       id: 'wadnr-fires-circle',
       type: 'circle',
       source: 'wadnr-fires',
       paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'],
-          6, 5, 10, 9,
+          6, ['interpolate', ['linear'], acresExpr, 0, 3.5, 10, 4, 100, 5, 1000, 6.5, 5000, 8],
+          10, ['interpolate', ['linear'], acresExpr, 0, 6, 10, 6.5, 100, 8, 1000, 10, 5000, 12],
         ],
-        'circle-color': '#FF4500',
+        'circle-color': ['interpolate', ['linear'], acresExpr,
+          0, '#ffd166',
+          10, '#ffb347',
+          100, '#ff7f50',
+          500, '#f95d6a',
+          2000, '#d7263d',
+          10000, '#7f1d1d',
+        ],
         'circle-stroke-color': '#8B1200',
         'circle-stroke-width': 1.5,
         'circle-opacity': 0.9,
@@ -436,12 +335,18 @@ export default function Map({
         'text-max-width': 8,
       },
       paint: {
-        'text-color': '#FF4500',
+        'text-color': ['interpolate', ['linear'], acresExpr,
+          0, '#ffb347',
+          100, '#ff7f50',
+          500, '#f95d6a',
+          2000, '#d7263d',
+          10000, '#7f1d1d',
+        ],
         'text-halo-color': '#000',
         'text-halo-width': 1.5,
       },
     })
-  }, [mapReady, wadnrFires])
+  }, [mapReady, wadnrFires, publicLands, showPublicLandFiresOnly])
 
   // ── Public lands vector layers ────────────────────────────────────────────────
   // After ensurePublicLandLayer adds layers (with visibility:'none'), immediately apply
@@ -492,16 +397,6 @@ export default function Map({
     const m = mapRef.current
     if (!m || !mapReady) return
 
-    setVis(m, 'fires-2024-fill',    layerVis.fires2024)
-    setVis(m, 'fires-2024-outline', layerVis.fires2024)
-    setVis(m, 'fires-2024-label',   layerVis.fires2024)
-    setVis(m, 'fires-2025-fill',    layerVis.fires2025)
-    setVis(m, 'fires-2025-outline', layerVis.fires2025)
-    setVis(m, 'fires-2025-label',   layerVis.fires2025)
-    setVis(m, 'snodas-layer',       layerVis.snodas)
-    setVis(m, 'modis-snow-layer',   layerVis.modisSnow)
-    setVis(m, 'landfire-layer',     layerVis.landfire)
-    setVis(m, 'noaa-qpe-layer',     layerVis.noaaQpe)
     setVis(m, 'nat-forests-fill',  layerVis.natForests)
     setVis(m, 'nat-forests-line',  layerVis.natForests)
     setVis(m, 'wilderness-fill',   layerVis.wilderness)
@@ -516,67 +411,6 @@ export default function Map({
     setVis(m, 'wadnr-fires-circle', layerVis.wadnrFires)
     setVis(m, 'wadnr-fires-label',  layerVis.wadnrFires)
   }, [mapReady, layerVis])
-
-  // ── SNOTEL markers ────────────────────────────────────────────────────────────
-  useEffect(() => {
-    // Clear old markers
-    snotelMarkersRef.current.forEach(mk => mk.remove())
-    snotelMarkersRef.current = []
-
-    const m = mapRef.current
-    if (!m || !mapReady || !snotelStations || !layerVis.snotel) return
-
-    snotelStations.forEach(station => {
-      const el = document.createElement('div')
-      el.className = 'snotel-marker'
-      el.title = `${station.name} (${station.elevation?.toLocaleString() ?? '?'} ft)`
-
-      const marker = new maplibregl.Marker({ element: el })
-        .setLngLat([station.longitude, station.latitude])
-        .addTo(m)
-
-      el.addEventListener('click', (e) => {
-        e.stopPropagation()
-        onFeatureClick({ type: 'snotel', station })
-      })
-
-      snotelMarkersRef.current.push(marker)
-    })
-  }, [mapReady, snotelStations, layerVis.snotel, onFeatureClick])
-
-  // ── iNaturalist markers ───────────────────────────────────────────────────────
-  useEffect(() => {
-    inatMarkersRef.current.forEach(mk => mk.remove())
-    inatMarkersRef.current = []
-
-    const m = mapRef.current
-    if (!m || !mapReady || !inatObs || !layerVis.inat) return
-
-    inatObs.forEach(obs => {
-      if (!obs.location) return
-      const parts = obs.location.split(',')
-      if (parts.length < 2) return
-      const lat = parseFloat(parts[0])
-      const lng = parseFloat(parts[1])
-      if (isNaN(lat) || isNaN(lng)) return
-
-      const el = document.createElement('div')
-      el.className = 'inat-marker'
-      const taxonName = obs.taxon?.name || 'Morchella sp.'
-      el.title = `${taxonName} — ${obs.observed_on || ''}`
-
-      const marker = new maplibregl.Marker({ element: el })
-        .setLngLat([lng, lat])
-        .addTo(m)
-
-      el.addEventListener('click', (e) => {
-        e.stopPropagation()
-        onFeatureClick({ type: 'inat', obs })
-      })
-
-      inatMarkersRef.current.push(marker)
-    })
-  }, [mapReady, inatObs, layerVis.inat, onFeatureClick])
 
   return <div ref={containerRef} className="map-container" />
 }

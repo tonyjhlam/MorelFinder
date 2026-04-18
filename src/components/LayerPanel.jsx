@@ -3,28 +3,12 @@ import '../App.css'
 
 const LAYER_GROUPS = [
   {
-    label: 'Fire Perimeters',
-    ids: ['fires2024', 'fires2025'],
-  },
-  {
     label: 'WA DNR Fire Incidents',
     ids: ['wadnrFires'],
   },
   {
-    label: 'Snow & Precipitation',
-    ids: ['snodas', 'modisSnow', 'noaaQpe'],
-  },
-  {
     label: 'Public Lands',
     ids: ['natForests', 'wilderness', 'natParks', 'blmLands', 'waDnrLands'],
-  },
-  {
-    label: 'Vegetation',
-    ids: ['landfire'],
-  },
-  {
-    label: 'Ground Truth',
-    ids: ['snotel', 'inat'],
   },
 ]
 
@@ -42,7 +26,23 @@ function Toggle({ id, checked, onChange }) {
   )
 }
 
-function LayerGroup({ group, layers, visibility, onToggle }) {
+function FireFilterOption({ checked, onChange }) {
+  return (
+    <div className="layer-subitem" onClick={onChange}>
+      <Toggle
+        id="toggle-public-land-fires-only"
+        checked={checked}
+        onChange={onChange}
+      />
+      <div className="layer-text">
+        <div className="layer-label">Only Fires On Public Lands</div>
+        <div className="layer-desc">Hide WA DNR incidents that fall outside loaded public-land boundaries</div>
+      </div>
+    </div>
+  )
+}
+
+function LayerGroup({ group, layers, visibility, onToggle, showPublicLandFiresOnly, onTogglePublicLandFiresOnly }) {
   const [open, setOpen] = useState(true)
   const visibleLayers = group.ids.filter(id => layers[id])
   if (visibleLayers.length === 0) return null
@@ -82,11 +82,26 @@ function LayerGroup({ group, layers, visibility, onToggle }) {
           </div>
         )
       })}
+
+      {open && group.ids.includes('wadnrFires') && (
+        <FireFilterOption
+          checked={showPublicLandFiresOnly}
+          onChange={onTogglePublicLandFiresOnly}
+        />
+      )}
     </div>
   )
 }
 
-export default function LayerPanel({ layers, visibility, onToggle, isOpen, onTogglePanel }) {
+export default function LayerPanel({
+  layers,
+  visibility,
+  onToggle,
+  showPublicLandFiresOnly,
+  onTogglePublicLandFiresOnly,
+  isOpen,
+  onTogglePanel,
+}) {
   return (
     <aside className={`layer-panel${isOpen ? '' : ' closed'}`}>
       {/* Tab button always visible on the panel edge */}
@@ -108,13 +123,14 @@ export default function LayerPanel({ layers, visibility, onToggle, isOpen, onTog
           layers={layers}
           visibility={visibility}
           onToggle={onToggle}
+          showPublicLandFiresOnly={showPublicLandFiresOnly}
+          onTogglePublicLandFiresOnly={onTogglePublicLandFiresOnly}
         />
       ))}
 
       <div className="panel-tip">
         <strong>Click the map</strong> for soil temp &amp; GDD at any point.<br />
-        <strong>Click a fire</strong> for burn details and morel outlook.<br />
-        <strong>Click a marker</strong> for live station data.
+        <strong>Click a fire</strong> for burn details and morel outlook.
       </div>
     </aside>
   )
