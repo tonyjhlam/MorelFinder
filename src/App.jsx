@@ -97,8 +97,8 @@ export const LAYERS = {
   },
   waDnrLands: {
     id: 'waDnrLands',
-    label: 'WA State & County Lands',
-    description: 'DNR forests, state parks, county/regional parks — Tiger Mtn, Squak Mtn, Cougar Mtn, etc.',
+    label: 'State & Local Public Lands',
+    description: 'State forests, state parks, county and regional public lands across the PNW',
     color: '#6d8b3a',
     defaultOn: false,
   },

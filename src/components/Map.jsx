@@ -29,6 +29,13 @@ const BASE_STYLE = {
   layers: [{ id: 'usgs-topo', type: 'raster', source: 'usgs-topo' }],
 }
 
+function pointCoordinates(feature) {
+  const coords = feature?.geometry?.coordinates
+  if (!Array.isArray(coords) || coords.length < 2) return { lng: null, lat: null }
+  const [lng, lat] = coords
+  return { lng, lat }
+}
+
 // ─── WMS / WMTS helper ──────────────────────────────────────────────────────
 
 function makeTileUrl(base, wmsParams) {
@@ -298,6 +305,7 @@ export default function Map({
       if (m.getLayer('wadnr-fires-circle')) {
         const pts = m.queryRenderedFeatures(e.point, { layers: ['wadnr-fires-circle'] })
         if (pts.length > 0) {
+          const { lng, lat } = pointCoordinates(pts[0])
           const p = pts[0].properties || {}
           onFeatureClick({
             type: 'wadnrFire',
@@ -312,6 +320,8 @@ export default function Map({
             discoveryDate: p.DSCVR_DT || null,
             controlDate: p.CONTROL_DT || null,
             fireOutDate: p.FIRE_OUT_D || null,
+            lat,
+            lng,
           })
           return
         }

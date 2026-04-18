@@ -8,10 +8,11 @@
  *
  * Layers:
  *   national-forests.geojson  — USFS National Forest System boundaries
- *   wilderness.geojson        — USFS Wilderness Areas
+ *   wilderness.geojson        — Wilderness areas
  *   national-parks.geojson    — NPS units (parks, monuments, recreation areas)
- *   blm-lands.geojson         — BLM Surface Management Agency
- *   wa-dnr-lands.geojson      — WA state + county public lands (DNR, State Parks, King County, etc.)
+ *   blm-lands.geojson         — BLM-administered lands
+ *   state-local-public-lands.geojson — PNW state + county public lands
+ *   wa-dnr-lands.geojson      — legacy WA-only state + county public lands
  */
 
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
@@ -60,6 +61,17 @@ async function tryAttempts(attempts) {
   return null
 }
 
+function mergeCollections(collections) {
+  const features = collections
+    .filter(Boolean)
+    .flatMap(collection => collection.features || [])
+    .filter(feature => feature?.geometry)
+
+  return features.length
+    ? { type: 'FeatureCollection', features }
+    : null
+}
+
 // ─── Overpass / OpenStreetMap helper ────────────────────────────────────────
 // Using [out:geojson] so the Overpass API returns a proper GeoJSON
 // FeatureCollection directly — no manual OSM→GeoJSON conversion needed.
@@ -87,8 +99,10 @@ async function tryOverpass(query) {
 
 // ─── Dataset definitions ─────────────────────────────────────────────────────
 
-// ESRI Living Atlas org — CORS-enabled, publicly accessible
-const LIVING_ATLAS = 'https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services'
+const PADUS = 'https://services.arcgis.com/v01gqwM5QqNysAAi/ArcGIS/rest/services'
+const BLM_SMA = 'https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer'
+const NPS_WILDERNESS = 'https://mapservices.nps.gov/arcgis/rest/services/Wilderness/Wilderness/FeatureServer/0/query'
+const PADUS_WILDERNESS = 'https://services1.arcgis.com/ypdMhhEhrtBXLtQv/ArcGIS/rest/services/PADUS_Wilderness_Areas/FeatureServer/87/query'
 
 // Overpass queries — bbox is (lat_min,lon_min,lat_max,lon_max) — WA state only
 // [out:geojson] makes Overpass return a proper GeoJSON FeatureCollection.
@@ -124,7 +138,8 @@ const DATASETS = [
     name: 'national-forests',
     label: 'National Forests',
     attempts: [
-      { url: `${LIVING_ATLAS}/USA_Federal_Lands/FeatureServer/0/query`, where: "ADMIN_AGENCY_CODE='FS'", outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,GIS_ACRES' },
+      { url: `${BLM_SMA}/24/query`, outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,ADMIN_ST' },
+      { url: `${PADUS}/Federal_Fee_Managers_Authoritative_PADUS/FeatureServer/0/query`, where: "ManagerName = 'USFS'", outFields: 'ManagerName,BndryName,State_Nm' },
       { url: 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_ForestSystemBoundaries_01/FeatureServer/0/query', outFields: 'FORESTNAME,REGION,GIS_ACRES' },
       { url: 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_ForestSystemBoundaries_01/FeatureServer/1/query', outFields: 'FORESTNAME,REGION,GIS_ACRES' },
       { url: 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_ForestSystemBoundaries_01/MapServer/1/query', outFields: 'FORESTNAME,REGION,GIS_ACRES' },
@@ -135,43 +150,49 @@ const DATASETS = [
     name: 'wilderness',
     label: 'Wilderness Areas',
     attempts: [
+      { url: PADUS_WILDERNESS, outFields: 'Own_Name,Loc_Mang,Loc_Nm,State_Nm' },
+      { url: NPS_WILDERNESS, outFields: 'WILDERNESSNAME,ADMINUNITCODE,ADMINUNITNAME' },
       { url: 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_Wilderness_01/FeatureServer/0/query', outFields: 'NAME,AREAID,GIS_ACRES' },
       { url: 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_Wilderness_01/MapServer/0/query', outFields: 'NAME,AREAID,GIS_ACRES' },
-      { url: `${LIVING_ATLAS}/USA_Federal_Lands/FeatureServer/0/query`, where: "ADMIN_AGENCY_CODE='FS' AND DESIGNATION='Wilderness'", outFields: 'ADMIN_UNIT_NAME,DESIGNATION,GIS_ACRES' },
+      { url: `${PADUS}/Federal_Management_Agencies_PADUS/FeatureServer/0/query`, where: "Loc_Mang = 'USFS' AND Des_Tp = 'Wilderness Area'", outFields: 'BndryName,Des_Tp,Loc_Mang,State_Nm' },
     ],
   },
   {
     name: 'national-parks',
     label: 'National Parks & Monuments',
     attempts: [
-      { url: `${LIVING_ATLAS}/USA_Federal_Lands/FeatureServer/0/query`, where: "ADMIN_AGENCY_CODE='NPS'", outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,GIS_ACRES' },
-      { url: 'https://mapservices.nps.gov/arcgis/rest/services/LandResourcesDivisionTractAndBoundaryService/MapServer/2/query', outFields: 'UNIT_NAME,UNIT_TYPE' },
+      { url: `${BLM_SMA}/23/query`, outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,ADMIN_ST' },
+      { url: 'https://services1.arcgis.com/fBc8EJBxQRMcHlei/ArcGIS/rest/services/National_Park_Service_Boundaries/FeatureServer/0/query', outFields: 'UNIT_NAME,UNIT_TYPE,UNIT_CODE' },
+      { url: `${PADUS}/Federal_Fee_Managers_Authoritative_PADUS/FeatureServer/0/query`, where: "ManagerName = 'NPS'", outFields: 'ManagerName,BndryName,State_Nm' },
     ],
   },
   {
     name: 'blm-lands',
     label: 'BLM Lands',
     attempts: [
-      { url: `${LIVING_ATLAS}/USA_Federal_Lands/FeatureServer/0/query`, where: "ADMIN_AGENCY_CODE='BLM'", outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,GIS_ACRES' },
-      { url: 'https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/1/query', outFields: 'AREANAME,AREAID,GIS_ACRES' },
-      { url: 'https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/0/query', outFields: 'AREANAME,AREAID,GIS_ACRES' },
+      { url: `${BLM_SMA}/22/query`, outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,ADMIN_ST' },
+      { url: `${PADUS}/Federal_Fee_Managers_Authoritative_PADUS/FeatureServer/0/query`, where: "ManagerName = 'BLM'", outFields: 'ManagerName,BndryName,State_Nm' },
     ],
   },
   {
-    name: 'wa-dnr-lands',
-    label: 'WA State & County Public Lands',
-    // Primary: ESRI Living Atlas PAD-US (state-managed lands)
-    // Fallback: OpenStreetMap via Overpass — comprehensive, includes county parks
-    //   Cougar Mountain (King County), Squak Mountain (WA State Parks),
-    //   Tiger Mountain (WA DNR) — all tagged boundary=protected_area in OSM
+    name: 'state-local-public-lands',
+    label: 'State & Local Public Lands',
     attempts: [
-      // USA_Protected_Areas_State = PAD-US state-managed lands
-      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='Washington'", outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
-      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "State_Nm='WA'",        outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
-      // USA_Protected_Areas_Local = PAD-US local/county government lands (Cougar Mtn)
-      { url: `${LIVING_ATLAS}/USA_Protected_Areas_Local/FeatureServer/0/query`,  where: "State_Nm='Washington'", outFields: 'Unit_Nm,Des_Tp,Mang_Name,GIS_Acres' },
-      // Broader fallbacks
-      { url: `${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, where: "1=1", outFields: 'Unit_Nm,Des_Tp,Mang_Name,State_Nm,GIS_Acres' },
+      { url: `${BLM_SMA}/29/query`, outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,ADMIN_ST' },
+      { url: `${BLM_SMA}/30/query`, outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,ADMIN_ST' },
+      { url: `${PADUS}/Fee_Managers_PADUS/FeatureServer/0/query`, where: "ManagerType IN ('State','Local Government')", outFields: 'ManagerName,ManagerType,BndryName,State_Nm' },
+      { url: `${PADUS}/Manager_Type_PADUS/FeatureServer/0/query`, where: "ManagerType IN ('State','Local Government')", outFields: 'ManagerType,BndryName,State_Nm,Loc_Mang' },
+    ],
+    combine: true,
+    overpassQuery: WA_PARKS_OVERPASS,
+  },
+  {
+    name: 'wa-dnr-lands',
+    label: 'WA State & County Public Lands (Legacy)',
+    attempts: [
+      { url: `${BLM_SMA}/29/query`, where: "ADMIN_ST = 'WA'", outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,ADMIN_ST' },
+      { url: `${BLM_SMA}/30/query`, where: "ADMIN_ST = 'WA'", outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,ADMIN_ST' },
+      { url: `${PADUS}/Fee_Managers_PADUS/FeatureServer/0/query`, where: "State_Nm = 'Washington' AND ManagerType IN ('State','Local Government')", outFields: 'ManagerName,ManagerType,BndryName,State_Nm' },
     ],
     overpassQuery: WA_PARKS_OVERPASS,
   },
@@ -186,7 +207,9 @@ async function main() {
     console.log(`\nFetching ${ds.label}…`)
     const outFile = join(OUT_DIR, `${ds.name}.geojson`)
 
-    let data = await tryAttempts(ds.attempts)
+    let data = ds.combine
+      ? mergeCollections(await Promise.all(ds.attempts.map(attempt => tryAttempts([attempt]))))
+      : await tryAttempts(ds.attempts)
 
     // If ArcGIS attempts all failed, try Overpass (OpenStreetMap)
     if (!data && ds.overpassQuery) {

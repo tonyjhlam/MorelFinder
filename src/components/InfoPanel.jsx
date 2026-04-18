@@ -212,6 +212,13 @@ function FireInfo({ info }) {
   )
 }
 
+function formatGps(lat, lng) {
+  if (lat == null || lng == null) return null
+  const latDir = lat >= 0 ? 'N' : 'S'
+  const lngDir = lng >= 0 ? 'E' : 'W'
+  return `${Math.abs(lat).toFixed(5)}°${latDir}, ${Math.abs(lng).toFixed(5)}°${lngDir}`
+}
+
 // ─── SNOTEL Info Panel ───────────────────────────────────────────────────────
 
 function SnotelInfo({ station }) {
@@ -347,6 +354,7 @@ function WADNRFireInfo({ info }) {
   const acresFormatted = info.acres != null
     ? Number(info.acres).toLocaleString(undefined, { maximumFractionDigits: 0 })
     : '?'
+  const gps = formatGps(info.lat, info.lng)
   return (
     <>
       <div className="fire-info-name">{info.name}</div>
@@ -386,6 +394,12 @@ function WADNRFireInfo({ info }) {
           <div className="fire-meta-item">
             <div className="fire-meta-value">{Number(info.elevation).toLocaleString()} ft</div>
             <div className="fire-meta-key">Elevation</div>
+          </div>
+        )}
+        {gps && (
+          <div className="fire-meta-item">
+            <div className="fire-meta-value" style={{ fontSize: 12 }}>{gps}</div>
+            <div className="fire-meta-key">GPS Coordinates</div>
           </div>
         )}
       </div>
