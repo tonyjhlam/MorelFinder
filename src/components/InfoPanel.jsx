@@ -35,9 +35,18 @@ function SoilTempInfo({ lat, lng }) {
   const { t6cm, t18cm, t10cm } = currentSoilTemp(data.forecast)
   const forecast = dailyForecast(data.forecast)
 
-  // GDD from historical 18cm temp (best single-depth proxy for 4")
-  const histT18 = data.history?.hourly?.soil_temperature_18cm || []
-  const gdd = computeGDD(histT18.length ? histT18 : (data.forecast?.hourly?.soil_temperature_18cm || []))
+  const hourlyTimes = data.forecast?.hourly?.time || []
+  const histT6 = data.forecast?.hourly?.soil_temperature_6cm || []
+  const histT18 = data.forecast?.hourly?.soil_temperature_18cm || []
+  const pastT10 = hourlyTimes
+    .map((time, i) => {
+      if (new Date(time).getTime() > Date.now()) return null
+      return interpolate10cm(histT6[i], histT18[i])
+    })
+    .filter(v => v != null)
+
+  // GDD from recent interpolated 10cm temps, limited to past hours only.
+  const gdd = computeGDD(pastT10)
   const gddInfo = gddStatus(gdd)
   const status10 = soilTempStatus(t10cm ?? t6cm)
 

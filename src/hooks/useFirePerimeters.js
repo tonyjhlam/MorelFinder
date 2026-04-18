@@ -17,7 +17,7 @@ const USFS_EDW = 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_FirePerime
 
 // State-based filter is more reliable than a bbox geometry query.
 // WA, OR, ID, MT covers the western Cascades and relevant east-slope fires.
-const PNW_STATES = `'WA','OR','ID','MT'`
+const PNW_STATES = `'WA','OR','ID','MT','US-WA','US-OR','US-ID','US-MT'`
 
 // Fallback: client-side bounding box check
 const PNW = { xmin: -126, ymin: 44, xmax: -115, ymax: 50 }
@@ -38,28 +38,9 @@ function firstCoord(geom) {
   return null
 }
 
-// ── Field name helpers ────────────────────────────────────────────────────────
-
-const YEAR_FIELDS = ['attr_FireYear', 'FireYear', 'FIRE_YEAR', 'fireYear']
-const STATE_FIELDS = ['attr_POOState', 'POOState', 'STATE', 'state']
-
-function getIntField(feature, fields) {
-  const p = feature.properties || {}
-  for (const f of fields) {
-    if (p[f] != null) {
-      const v = parseInt(p[f], 10)
-      if (!isNaN(v)) return v
-    }
-  }
-  return null
-}
-
-function getStrField(feature, fields) {
-  const p = feature.properties || {}
-  for (const f of fields) {
-    if (p[f] != null) return String(p[f]).trim().toUpperCase()
-  }
-  return null
+function yearWhere(year) {
+  const nextYear = year + 1
+  return `attr_FireDiscoveryDateTime >= DATE '${year}-01-01 00:00:00' AND attr_FireDiscoveryDateTime < DATE '${nextYear}-01-01 00:00:00'`
 }
 
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
@@ -90,10 +71,10 @@ function qs(params) {
 // ── Passes ────────────────────────────────────────────────────────────────────
 
 async function fetchPerimeters(year) {
-  // ── Pass 1: history service, state filter + year filter ────────────────────
-  // Uses a SQL WHERE clause only (no geometry) — most reliable query form.
-  // State filter restricts to PNW states; year filter targets the season.
-  const p1q = qs({ where: `attr_FireYear = ${year} AND attr_POOState IN (${PNW_STATES})` })
+  const dateWhere = yearWhere(year)
+
+  // ── Pass 1: history service, date filter + state filter ────────────────────
+  const p1q = qs({ where: `${dateWhere} AND attr_POOState IN (${PNW_STATES})` })
   for (const url of [HISTORY, YTD]) {
     try {
       const json = await tryFetch(`${url}?${p1q}`)
@@ -105,9 +86,8 @@ async function fetchPerimeters(year) {
     } catch (e) { console.warn('[NIFC] Pass 1 error:', e.message) }
   }
 
-  // ── Pass 2: year filter only, no state/geo — client-side PNW filter ────────
-  // In case attr_POOState doesn't exist or state values differ.
-  const p2q = qs({ where: `attr_FireYear = ${year}`, resultRecordCount: '1000' })
+  // ── Pass 2: date filter only, no state/geo — client-side PNW filter ────────
+  const p2q = qs({ where: dateWhere, resultRecordCount: '1000' })
   for (const url of [HISTORY, YTD]) {
     try {
       const json = await tryFetch(`${url}?${p2q}`)
@@ -125,50 +105,34 @@ async function fetchPerimeters(year) {
     } catch (e) { console.warn('[NIFC] Pass 2 error:', e.message) }
   }
 
-  // ── Pass 3: try alternate year field names ─────────────────────────────────
-  // Some schema versions use FireYear (no attr_ prefix).
-  const p3q = qs({ where: `FireYear = ${year}` })
-  for (const url of [HISTORY, YTD]) {
-    try {
-      const json = await tryFetch(`${url}?${p3q}`)
-      if (!json?.features?.length) continue
-      const filtered = json.features.filter(f =>
-        getIntField(f, YEAR_FIELDS) === year && isInPNW(f)
-      )
-      if (filtered.length > 0) {
-        console.log(`[NIFC] Pass 3 OK: ${filtered.length} features (FireYear field)`)
-        return { ...json, features: filtered }
-      }
-    } catch (e) { console.warn('[NIFC] Pass 3 error:', e.message) }
-  }
-
-  // ── Pass 4: wide query, client-side everything ─────────────────────────────
-  // Last resort: recent large fires, no server-side year/geo filter.
-  const p4q = qs({ where: 'attr_TotalAcres >= 500', orderByFields: 'attr_FireYear DESC' })
+  // ── Pass 3: wide query, client-side everything ─────────────────────────────
+  // Last resort: large recent fires, filtered client-side to the target year.
+  const p3q = qs({ where: 'poly_GISAcres >= 500', orderByFields: 'attr_FireDiscoveryDateTime DESC' })
   try {
-    const json = await tryFetch(`${HISTORY}?${p4q}`)
+    const json = await tryFetch(`${HISTORY}?${p3q}`)
     if (json?.features?.length > 0) {
-      console.log(`[NIFC] Pass 4 wide raw: ${json.features.length} | props:`,
+      console.log(`[NIFC] Pass 3 wide raw: ${json.features.length} | props:`,
         Object.keys(json.features[0].properties || {}))
       const filtered = json.features.filter(f =>
-        getIntField(f, YEAR_FIELDS) === year && isInPNW(f)
+        isInPNW(f)
+        && new Date(f.properties?.attr_FireDiscoveryDateTime || 0).getUTCFullYear() === year
       )
       if (filtered.length > 0) {
-        console.log(`[NIFC] Pass 4 OK: ${filtered.length} features for ${year}`)
+        console.log(`[NIFC] Pass 3 OK: ${filtered.length} features for ${year}`)
         return { ...json, features: filtered }
       }
     }
-  } catch (e) { console.warn('[NIFC] Pass 4 error:', e.message) }
+  } catch (e) { console.warn('[NIFC] Pass 3 error:', e.message) }
 
-  // ── Pass 5: USFS EDW (NFS lands only, different schema) ───────────────────
-  const p5q = qs({ where: `FIRE_YEAR = ${year} AND STATE IN (${PNW_STATES})` })
+  // ── Pass 4: USFS EDW (NFS lands only, different schema) ───────────────────
+  const p4q = qs({ where: `FIRE_YEAR = ${year} AND STATE IN (${PNW_STATES})` })
   try {
-    const json = await tryFetch(`${USFS_EDW}?${p5q}`)
+    const json = await tryFetch(`${USFS_EDW}?${p4q}`)
     if (json?.features?.length > 0) {
-      console.log(`[NIFC] Pass 5 USFS EDW OK: ${json.features.length} features for ${year}`)
+      console.log(`[NIFC] Pass 4 USFS EDW OK: ${json.features.length} features for ${year}`)
       return json
     }
-  } catch (e) { console.warn('[NIFC] Pass 5 USFS error:', e.message) }
+  } catch (e) { console.warn('[NIFC] Pass 4 USFS error:', e.message) }
 
   console.warn(`[NIFC] All passes failed for year=${year}. ` +
     'Open DevTools → Network to check for CORS errors on services3.arcgis.com requests.')

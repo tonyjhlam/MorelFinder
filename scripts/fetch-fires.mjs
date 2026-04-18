@@ -25,32 +25,25 @@ const SERVICES = [
 ]
 
 // PNW states — keeps file sizes manageable, covers all morel targets
-const PNW_STATES = `'WA','OR','ID','MT'`
+const PNW_STATES = `'WA','OR','ID','MT','US-WA','US-OR','US-ID','US-MT'`
 const PNW = { xmin: -126, ymin: 44, xmax: -115, ymax: 50 }
 
-// Fields to keep — drops heavy geometry-adjacent metadata we don't need
-const FIELDS = [
-  'attr_IncidentName',
-  'attr_TotalAcres',
-  'attr_FireYear',
-  'attr_PercentContained',
-  'attr_ContainmentDateTime',
-  'attr_POOState',
-  'attr_POOCounty',
-].join(',')
+function yearWhere(year) {
+  const nextYear = year + 1
+  return `attr_FireDiscoveryDateTime >= DATE '${year}-01-01 00:00:00' AND attr_FireDiscoveryDateTime < DATE '${nextYear}-01-01 00:00:00'`
+}
 
 async function fetchFromService(serviceUrl, year) {
-  // Try 1: year + state filter (most specific)
-  // Try 2: year filter only (client-side state filter)
+  const dateWhere = yearWhere(year)
   const queries = [
-    { where: `attr_FireYear = ${year} AND attr_POOState IN (${PNW_STATES})` },
-    { where: `attr_FireYear = ${year}` },
-    { where: `FireYear = ${year} AND STATE IN (${PNW_STATES})` }, // alt schema
+    { where: `${dateWhere} AND attr_POOState IN (${PNW_STATES})` },
+    { where: dateWhere },
+    { where: 'poly_GISAcres >= 500', orderByFields: 'attr_FireDiscoveryDateTime DESC' },
   ]
 
   for (const extra of queries) {
     const params = new URLSearchParams({
-      outFields: FIELDS,
+      outFields: '*',
       f: 'geojson',
       resultRecordCount: '2000',
       ...extra,
@@ -68,8 +61,13 @@ async function fetchFromService(serviceUrl, year) {
 
       // Client-side PNW filter for queries without state clause
       let features = json.features
-      if (!extra.where.includes('POOState') && !extra.where.includes('STATE')) {
+      if (!extra.where.includes('POOState')) {
         features = features.filter(f => isInPNW(f))
+      }
+      if (!extra.where.includes('attr_FireDiscoveryDateTime')) {
+        features = features.filter(f =>
+          new Date(f.properties?.attr_FireDiscoveryDateTime || 0).getUTCFullYear() === year
+        )
       }
 
       console.log(`    ✓ ${features.length} PNW features`)

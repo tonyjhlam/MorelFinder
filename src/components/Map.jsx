@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { getNotableFire } from '../utils/colors.js'
 
 // Western Washington center, zoom
 const CENTER = [-122.1, 47.5]
@@ -123,6 +124,72 @@ function prepareWadnrFireSourceData(wadnrFires, publicLands, publicOnly) {
   return { ...wadnrFires, features }
 }
 
+function ensureFireLayer(map, id, geojson, fillColor, outlineColor, fillOpacity) {
+  if (map.getSource(id)) {
+    map.getSource(id).setData(geojson)
+    return
+  }
+
+  map.addSource(id, { type: 'geojson', data: geojson })
+  map.addLayer({
+    id: `${id}-fill`,
+    type: 'fill',
+    source: id,
+    paint: {
+      'fill-color': fillColor,
+      'fill-opacity': fillOpacity,
+    },
+    layout: { visibility: 'none' },
+  })
+  map.addLayer({
+    id: `${id}-outline`,
+    type: 'line',
+    source: id,
+    paint: {
+      'line-color': outlineColor,
+      'line-width': ['interpolate', ['linear'], ['zoom'], 6, 1, 12, 2.5],
+    },
+    layout: { visibility: 'none' },
+  })
+  map.addLayer({
+    id: `${id}-label`,
+    type: 'symbol',
+    source: id,
+    minzoom: 9,
+    layout: {
+      'text-field': [
+        'coalesce',
+        ['get', 'attr_IncidentName'],
+        ['get', 'IncidentName'],
+        ['get', 'FIRE_NAME'],
+        '',
+      ],
+      'text-size': 11,
+      'text-anchor': 'center',
+      'text-max-width': 8,
+      visibility: 'none',
+    },
+    paint: {
+      'text-color': '#fff',
+      'text-halo-color': '#000',
+      'text-halo-width': 1.5,
+    },
+  })
+}
+
+function fireProps(properties) {
+  const p = properties || {}
+  return {
+    name: p.attr_IncidentName || p.IncidentName || p.FIRE_NAME || p.fireName || 'Unknown Fire',
+    acres: p.attr_TotalAcres || p.GISAcres || p.GISACRES || p.totalAcres || null,
+    year: p.attr_FireYear || p.FireYear || p.FIRE_YEAR || p.fireYear || null,
+    pct: p.attr_PercentContained ?? p.PercentContained ?? null,
+    state: p.attr_POOState || p.POOState || '',
+    county: p.attr_POOCounty || p.POOCounty || '',
+    containedDate: p.attr_ContainmentDateTime || p.ContainmentDateTime || null,
+  }
+}
+
 function setVis(map, layerId, visible) {
   if (map.getLayer(layerId)) {
     map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none')
@@ -157,10 +224,21 @@ function ensurePublicLandLayer(map, id, geojson, fillColor, lineColor, fillOpaci
   })
 }
 
+function moveLayerIfPresent(map, layerId, beforeId) {
+  if (!map.getLayer(layerId)) return
+  if (beforeId && map.getLayer(beforeId)) {
+    map.moveLayer(layerId, beforeId)
+    return
+  }
+  map.moveLayer(layerId)
+}
+
 // ─── Map component ───────────────────────────────────────────────────────────
 
 export default function Map({
   layerVis,
+  fires2024,
+  fires2025,
   wadnrFires,
   publicLands,
   showPublicLandFiresOnly,
@@ -210,6 +288,17 @@ export default function Map({
     if (!m || !mapReady) return
 
     const handleClick = (e) => {
+      const fireLayers = ['fires-2024-fill', 'fires-2025-fill'].filter(id => m.getLayer(id))
+      if (fireLayers.length > 0) {
+        const features = m.queryRenderedFeatures(e.point, { layers: fireLayers })
+        if (features.length > 0) {
+          const props = fireProps(features[0].properties)
+          const notable = getNotableFire(props.name)
+          onFeatureClick({ type: 'fire', ...props, notable })
+          return
+        }
+      }
+
       // Check WADNR fire points first (on top)
       if (m.getLayer('wadnr-fires-circle')) {
         const pts = m.queryRenderedFeatures(e.point, { layers: ['wadnr-fires-circle'] })
@@ -249,7 +338,7 @@ export default function Map({
     const m = mapRef.current
     if (!m || !mapReady) return
 
-    const fireIds = ['wadnr-fires-circle']
+    const fireIds = ['fires-2024-fill', 'fires-2025-fill', 'wadnr-fires-circle']
     const enter = () => { m.getCanvas().style.cursor = 'pointer' }
     const leave = () => { m.getCanvas().style.cursor = '' }
 
@@ -264,6 +353,19 @@ export default function Map({
       })
     }
   }, [mapReady])
+
+  // ── Historical fire perimeters ───────────────────────────────────────────────
+  useEffect(() => {
+    const m = mapRef.current
+    if (!m || !mapReady || !fires2024) return
+    ensureFireLayer(m, 'fires-2024', fires2024, '#FF8C00', '#C85C00', 0.28)
+  }, [mapReady, fires2024])
+
+  useEffect(() => {
+    const m = mapRef.current
+    if (!m || !mapReady || !fires2025) return
+    ensureFireLayer(m, 'fires-2025', fires2025, '#E63946', '#9B1B2A', 0.32)
+  }, [mapReady, fires2025])
 
   // ── WADNR fire points ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -397,6 +499,22 @@ export default function Map({
     const m = mapRef.current
     if (!m || !mapReady) return
 
+    moveLayerIfPresent(m, 'fires-2024-fill', 'wadnr-fires-halo')
+    moveLayerIfPresent(m, 'fires-2024-outline', 'wadnr-fires-halo')
+    moveLayerIfPresent(m, 'fires-2024-label', 'wadnr-fires-halo')
+    moveLayerIfPresent(m, 'fires-2025-fill', 'wadnr-fires-halo')
+    moveLayerIfPresent(m, 'fires-2025-outline', 'wadnr-fires-halo')
+    moveLayerIfPresent(m, 'fires-2025-label', 'wadnr-fires-halo')
+    moveLayerIfPresent(m, 'wadnr-fires-halo')
+    moveLayerIfPresent(m, 'wadnr-fires-circle')
+    moveLayerIfPresent(m, 'wadnr-fires-label')
+
+    setVis(m, 'fires-2024-fill',   layerVis.fires2024)
+    setVis(m, 'fires-2024-outline', layerVis.fires2024)
+    setVis(m, 'fires-2024-label',  layerVis.fires2024)
+    setVis(m, 'fires-2025-fill',   layerVis.fires2025)
+    setVis(m, 'fires-2025-outline', layerVis.fires2025)
+    setVis(m, 'fires-2025-label',  layerVis.fires2025)
     setVis(m, 'nat-forests-fill',  layerVis.natForests)
     setVis(m, 'nat-forests-line',  layerVis.natForests)
     setVis(m, 'wilderness-fill',   layerVis.wilderness)

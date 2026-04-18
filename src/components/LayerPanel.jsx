@@ -3,6 +3,10 @@ import '../App.css'
 
 const LAYER_GROUPS = [
   {
+    label: 'Historical Fire Perimeters',
+    ids: ['fires2024', 'fires2025'],
+  },
+  {
     label: 'WA DNR Fire Incidents',
     ids: ['wadnrFires'],
   },

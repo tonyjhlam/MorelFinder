@@ -3,11 +3,26 @@ import Map from './components/Map.jsx'
 import LayerPanel from './components/LayerPanel.jsx'
 import InfoPanel from './components/InfoPanel.jsx'
 import Legend from './components/Legend.jsx'
+import { useFirePerimeters } from './hooks/useFirePerimeters.js'
 import { useWADNRFirePoints } from './hooks/useWADNRFirePoints.js'
 import { usePublicLands } from './hooks/usePublicLands.js'
 import './App.css'
 
 export const LAYERS = {
+  fires2024: {
+    id: 'fires2024',
+    label: '2024 Large Fire Perimeters',
+    description: 'Historical large fires from 2024 across the PNW',
+    color: '#FF8C00',
+    defaultOn: true,
+  },
+  fires2025: {
+    id: 'fires2025',
+    label: '2025 Large Fire Perimeters',
+    description: 'Historical large fires from 2025 across the PNW',
+    color: '#E63946',
+    defaultOn: true,
+  },
   natForests: {
     id: 'natForests',
     label: 'National Forests',
@@ -64,6 +79,8 @@ export default function App() {
   const [clickedInfo, setClickedInfo] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
+  const { data: fires2024 } = useFirePerimeters(2024)
+  const { data: fires2025 } = useFirePerimeters(2025)
   const { data: wadnrFires } = useWADNRFirePoints(2025)
   const publicLands = usePublicLands()
 
@@ -99,6 +116,8 @@ export default function App() {
         <div className="map-wrapper">
           <Map
             layerVis={layerVis}
+            fires2024={fires2024}
+            fires2025={fires2025}
             wadnrFires={wadnrFires}
             publicLands={publicLands}
             showPublicLandFiresOnly={showPublicLandFiresOnly}
