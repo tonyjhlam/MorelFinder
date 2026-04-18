@@ -1,14 +1,9 @@
 import { useState, useEffect } from 'react'
 
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
-const ARCHIVE_URL = 'https://archive-api.open-meteo.com/v1/archive'
-
-function formatDate(d) {
-  return d.toISOString().split('T')[0]
-}
 
 /**
- * Fetches soil temperature forecast + 20-day history from Open-Meteo for
+ * Fetches soil temperature forecast + recent past history from Open-Meteo for
  * the given lat/lng. Returns combined data for GDD calculation and display.
  *
  * Depths: 6 cm (~2.4") and 18 cm (~7") — bracketing the 4" morel target.
@@ -26,38 +21,23 @@ export function useOpenMeteo(lat, lng) {
     setData(null)
     setError(null)
 
-    const today = new Date()
-    const historyStart = new Date(today)
-    historyStart.setDate(today.getDate() - 21)
-    const yesterday = new Date(today)
-    yesterday.setDate(today.getDate() - 1)
-
-    const commonParams = {
+    const forecastUrl = new URL(FORECAST_URL)
+    Object.entries({
       latitude: lat.toFixed(4),
       longitude: lng.toFixed(4),
       hourly: 'soil_temperature_6cm,soil_temperature_18cm',
       temperature_unit: 'fahrenheit',
       timezone: 'America/Los_Angeles',
-    }
-
-    const forecastUrl = new URL(FORECAST_URL)
-    Object.entries({ ...commonParams, forecast_days: '7' })
+      forecast_days: '7',
+      past_days: '21',
+    })
       .forEach(([k, v]) => forecastUrl.searchParams.set(k, v))
 
-    const archiveUrl = new URL(ARCHIVE_URL)
-    Object.entries({
-      ...commonParams,
-      start_date: formatDate(historyStart),
-      end_date: formatDate(yesterday),
-    }).forEach(([k, v]) => archiveUrl.searchParams.set(k, v))
-
-    Promise.all([
-      fetch(forecastUrl.toString(), { signal: AbortSignal.timeout(12000) }).then(r => r.json()),
-      fetch(archiveUrl.toString(), { signal: AbortSignal.timeout(12000) }).then(r => r.json()),
-    ])
-      .then(([forecast, history]) => {
+    fetch(forecastUrl.toString(), { signal: AbortSignal.timeout(12000) })
+      .then(r => r.json())
+      .then((forecast) => {
         if (cancelled) return
-        setData({ forecast, history, lat, lng })
+        setData({ forecast, lat, lng })
         setLoading(false)
       })
       .catch(err => {

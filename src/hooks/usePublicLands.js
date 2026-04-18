@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react'
 
+const LIVING_ATLAS = 'https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services'
+const PNW_BBOX = { xmin: -126, ymin: 44, xmax: -115, ymax: 50 }
+
 // Washington State bounds (lat_min,lon_min,lat_max,lon_max — Overpass order)
 const WA_BBOX = '45.54,-124.8,49.1,-116.9'
 
@@ -107,6 +110,53 @@ async function loadStatic(name) {
   }
 }
 
+async function fetchArcGisCollection(url, { where = '1=1', outFields = '*' } = {}) {
+  try {
+    const params = new URLSearchParams({
+      where,
+      geometryType: 'esriGeometryEnvelope',
+      geometry: `${PNW_BBOX.xmin},${PNW_BBOX.ymin},${PNW_BBOX.xmax},${PNW_BBOX.ymax}`,
+      inSR: '4326',
+      spatialRel: 'esriSpatialRelIntersects',
+      outFields,
+      outSR: '4326',
+      f: 'geojson',
+      resultRecordCount: '4000',
+    })
+    const res = await fetch(`${url}?${params}`, { signal: AbortSignal.timeout(30000) })
+    if (!res.ok) return null
+    const json = await res.json()
+    if (json.error || !json.features?.length) return null
+    return json
+  } catch {
+    return null
+  }
+}
+
+function mergeCollections(collections) {
+  const features = collections
+    .filter(Boolean)
+    .flatMap(collection => collection.features || [])
+    .filter(feature => feature?.geometry)
+
+  return features.length
+    ? { type: 'FeatureCollection', features }
+    : null
+}
+
+async function loadStateLocalPublicLandsLive() {
+  const [stateLands, localLands] = await Promise.all([
+    fetchArcGisCollection(`${LIVING_ATLAS}/USA_Protected_Areas_State/FeatureServer/0/query`, {
+      outFields: 'Unit_Nm,Des_Tp,Mang_Name,State_Nm,GIS_Acres',
+    }),
+    fetchArcGisCollection(`${LIVING_ATLAS}/USA_Protected_Areas_Local/FeatureServer/0/query`, {
+      outFields: 'Unit_Nm,Des_Tp,Mang_Name,State_Nm,GIS_Acres',
+    }),
+  ])
+
+  return mergeCollections([stateLands, localLands])
+}
+
 // Fetch WA state + county parks live from Overpass (CORS-enabled, no auth).
 // Covers Cougar Mountain (King County), Squak Mountain (WA State Parks),
 // Tiger Mountain (WA DNR), and all other named WA protected areas.
@@ -149,15 +199,23 @@ export function usePublicLands() {
 
   useEffect(() => {
     async function load() {
-      const [natForests, wilderness, natParks, blmLands, waDnrStatic] = await Promise.all([
+      const [natForests, wilderness, natParks, blmLands, stateLocalStatic, waDnrStatic] = await Promise.all([
         loadStatic('national-forests'),
         loadStatic('wilderness'),
         loadStatic('national-parks'),
         loadStatic('blm-lands'),
+        loadStatic('state-local-public-lands'),
         loadStatic('wa-dnr-lands'),
       ])
-      // Fall back to live Overpass query if CI file is missing or empty
-      const waDnrLands = waDnrStatic ?? await loadWAParksFromOverpass()
+
+      // Prefer the expanded PNW state/local lands dataset, then fall back
+      // to live ArcGIS, then the legacy WA-only file, then WA OSM parks.
+      const waDnrLands =
+        stateLocalStatic ??
+        await loadStateLocalPublicLandsLive() ??
+        waDnrStatic ??
+        await loadWAParksFromOverpass()
+
       setData({ natForests, wilderness, natParks, blmLands, waDnrLands })
     }
     load()

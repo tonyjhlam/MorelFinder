@@ -2,16 +2,10 @@ export default function Legend({ layerVis }) {
   const rows = []
 
   if (layerVis.fires2025) {
-    rows.push({ color: '#E63946', label: '2025 fires (spring 2026 targets)' })
+    rows.push({ color: '#E63946', label: '2025 large fire perimeter' })
   }
   if (layerVis.fires2024) {
-    rows.push({ color: '#FF8C00', label: '2024 fires (spring 2025 targets)' })
-  }
-  if (layerVis.snotel) {
-    rows.push({ color: '#4ecca3', label: 'SNOTEL station', round: true })
-  }
-  if (layerVis.inat) {
-    rows.push({ color: '#98c379', label: 'Morchella observation', round: true })
+    rows.push({ color: '#FF8C00', label: '2024 large fire perimeter' })
   }
 
   const soilRows = [
@@ -22,26 +16,20 @@ export default function Legend({ layerVis }) {
     { color: '#e74c3c', label: '> 62°F  Too hot' },
   ]
 
-  if (rows.length === 0) return null
-
   return (
     <div className="legend">
-      <div className="legend-title">Legend</div>
-
-      {rows.map(r => (
-        <div className="legend-row" key={r.label}>
-          <span
-            className="legend-swatch"
-            style={{
-              background: r.color,
-              borderRadius: r.round ? '50%' : 2,
-            }}
-          />
-          <span>{r.label}</span>
-        </div>
-      ))}
-
-      <div className="legend-divider" />
+      {rows.length > 0 && (
+        <>
+          <div className="legend-title">Fire Layers</div>
+          {rows.map(r => (
+            <div className="legend-row" key={r.label}>
+              <span className="legend-swatch" style={{ background: r.color }} />
+              <span>{r.label}</span>
+            </div>
+          ))}
+          <div className="legend-divider" />
+        </>
+      )}
       <div className="legend-title">Soil Temp (click map)</div>
       {soilRows.map(r => (
         <div className="legend-row" key={r.label}>

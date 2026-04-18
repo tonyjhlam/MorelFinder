@@ -193,6 +193,20 @@
   background: #1f2937;
 }
 
+.layer-subitem {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 14px 10px 46px;
+  cursor: pointer;
+  transition: background 0.15s;
+  user-select: none;
+}
+
+.layer-subitem:hover {
+  background: #1f2937;
+}
+
 .layer-toggle {
   position: relative;
   width: 32px;

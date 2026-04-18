@@ -35,9 +35,18 @@ function SoilTempInfo({ lat, lng }) {
   const { t6cm, t18cm, t10cm } = currentSoilTemp(data.forecast)
   const forecast = dailyForecast(data.forecast)
 
-  // GDD from historical 18cm temp (best single-depth proxy for 4")
-  const histT18 = data.history?.hourly?.soil_temperature_18cm || []
-  const gdd = computeGDD(histT18.length ? histT18 : (data.forecast?.hourly?.soil_temperature_18cm || []))
+  const hourlyTimes = data.forecast?.hourly?.time || []
+  const histT6 = data.forecast?.hourly?.soil_temperature_6cm || []
+  const histT18 = data.forecast?.hourly?.soil_temperature_18cm || []
+  const pastT10 = hourlyTimes
+    .map((time, i) => {
+      if (new Date(time).getTime() > Date.now()) return null
+      return interpolate10cm(histT6[i], histT18[i])
+    })
+    .filter(v => v != null)
+
+  // GDD from recent interpolated 10cm temps, limited to past hours only.
+  const gdd = computeGDD(pastT10)
   const gddInfo = gddStatus(gdd)
   const status10 = soilTempStatus(t10cm ?? t6cm)
 
@@ -135,10 +144,16 @@ function SoilTempInfo({ lat, lng }) {
 
 // ─── Fire Info Panel ─────────────────────────────────────────────────────────
 
+function formatAcres(acres) {
+  if (acres == null) return '?'
+  return Number(acres).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+}
+
 function FireInfo({ info }) {
-  const acresFormatted = info.acres
-    ? Number(info.acres).toLocaleString(undefined, { maximumFractionDigits: 0 })
-    : '?'
+  const acresFormatted = formatAcres(info.acres)
 
   return (
     <>
@@ -210,6 +225,13 @@ function FireInfo({ info }) {
       </div>
     </>
   )
+}
+
+function formatGps(lat, lng) {
+  if (lat == null || lng == null) return null
+  const latDir = lat >= 0 ? 'N' : 'S'
+  const lngDir = lng >= 0 ? 'E' : 'W'
+  return `${Math.abs(lat).toFixed(5)}°${latDir}, ${Math.abs(lng).toFixed(5)}°${lngDir}`
 }
 
 // ─── SNOTEL Info Panel ───────────────────────────────────────────────────────
@@ -344,9 +366,8 @@ function InatInfo({ obs }) {
 // ─── WADNR Fire Point Panel ───────────────────────────────────────────────────
 
 function WADNRFireInfo({ info }) {
-  const acresFormatted = info.acres != null
-    ? Number(info.acres).toLocaleString(undefined, { maximumFractionDigits: 0 })
-    : '?'
+  const acresFormatted = formatAcres(info.acres)
+  const gps = formatGps(info.lat, info.lng)
   return (
     <>
       <div className="fire-info-name">{info.name}</div>
@@ -386,6 +407,12 @@ function WADNRFireInfo({ info }) {
           <div className="fire-meta-item">
             <div className="fire-meta-value">{Number(info.elevation).toLocaleString()} ft</div>
             <div className="fire-meta-key">Elevation</div>
+          </div>
+        )}
+        {gps && (
+          <div className="fire-meta-item">
+            <div className="fire-meta-value" style={{ fontSize: 12 }}>{gps}</div>
+            <div className="fire-meta-key">GPS Coordinates</div>
           </div>
         )}
       </div>
