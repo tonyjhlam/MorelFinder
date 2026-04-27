@@ -7,6 +7,9 @@ export default function Legend({ layerVis }) {
   if (layerVis.fires2024) {
     rows.push({ color: '#FF8C00', label: '2024 large fire perimeter' })
   }
+  if (layerVis.usfsFireClosures) {
+    rows.push({ color: '#b00020', label: 'USFS active fire closure area' })
+  }
 
   const soilRows = [
     { color: '#74c0fc', label: '< 40°F  Too cold' },

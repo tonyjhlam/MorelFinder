@@ -11,6 +11,8 @@
  *   wilderness.geojson        — Wilderness areas
  *   national-parks.geojson    — NPS units (parks, monuments, recreation areas)
  *   blm-lands.geojson         — BLM-administered lands
+ *   nature-preserves.geojson  — Nature preserves and reserves
+ *   usfs-fire-closures.geojson — Active USFS Region 6 fire closure polygons
  *   state-local-public-lands.geojson — PNW state + county public lands
  *   wa-dnr-lands.geojson      — legacy WA-only state + county public lands
  */
@@ -27,6 +29,7 @@ const BBOX = { xmin: -126, ymin: 44, xmax: -115, ymax: 50 }
 
 // Washington State bounds for Overpass (tighter than full PNW)
 const WA_BBOX_OVERPASS = '45.54,-124.8,49.1,-116.9' // lat_min,lon_min,lat_max,lon_max
+const PNW_BBOX_OVERPASS = '44,-126,50,-115'
 
 // ─── ArcGIS REST helper ──────────────────────────────────────────────────────
 
@@ -103,6 +106,8 @@ const PADUS = 'https://services.arcgis.com/v01gqwM5QqNysAAi/ArcGIS/rest/services
 const BLM_SMA = 'https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer'
 const NPS_WILDERNESS = 'https://mapservices.nps.gov/arcgis/rest/services/Wilderness/Wilderness/FeatureServer/0/query'
 const PADUS_WILDERNESS = 'https://services1.arcgis.com/ypdMhhEhrtBXLtQv/ArcGIS/rest/services/PADUS_Wilderness_Areas/FeatureServer/87/query'
+const USFS_FIRE_CLOSURES = 'https://services1.arcgis.com/gGHDlz6USftL5Pau/arcgis/rest/services/R06_FireClosureOrders_PublicView/FeatureServer/2/query'
+const NATURE_PRESERVES_WHERE = "Des_Tp <> 'MIL' AND (UPPER(Unit_Nm) LIKE '%PRESERVE%' OR UPPER(Unit_Nm) LIKE '%RESERVE%' OR UPPER(Unit_Nm) LIKE '%NATURAL AREA%' OR UPPER(Loc_Nm) LIKE '%PRESERVE%' OR UPPER(Loc_Nm) LIKE '%RESERVE%' OR UPPER(Loc_Nm) LIKE '%NATURAL AREA%' OR UPPER(Des_Tp) LIKE '%PRESERVE%' OR UPPER(Des_Tp) LIKE '%RESERVE%' OR UPPER(Des_Tp) LIKE '%NATURAL AREA%')"
 
 // Overpass queries — bbox is (lat_min,lon_min,lat_max,lon_max) — WA state only
 // [out:geojson] makes Overpass return a proper GeoJSON FeatureCollection.
@@ -129,6 +134,19 @@ const PNW_FORESTS_OVERPASS = `
   way["operator"="US Forest Service"]["boundary"="protected_area"](${WA_BBOX_OVERPASS});
   relation["boundary"="national_forest"](${WA_BBOX_OVERPASS});
   relation["operator"="US Forest Service"]["boundary"="protected_area"](${WA_BBOX_OVERPASS});
+);
+out geom;
+`
+
+const PNW_NATURE_PRESERVES_OVERPASS = `
+[out:geojson][timeout:90];
+(
+  way["leisure"="nature_reserve"]["name"](${PNW_BBOX_OVERPASS});
+  relation["leisure"="nature_reserve"]["name"](${PNW_BBOX_OVERPASS});
+  way["boundary"="protected_area"]["protect_class"="1"]["name"](${PNW_BBOX_OVERPASS});
+  relation["boundary"="protected_area"]["protect_class"="1"]["name"](${PNW_BBOX_OVERPASS});
+  way["boundary"="protected_area"]["designation"~"preserve|reserve", i]["name"](${PNW_BBOX_OVERPASS});
+  relation["boundary"="protected_area"]["designation"~"preserve|reserve", i]["name"](${PNW_BBOX_OVERPASS});
 );
 out geom;
 `
@@ -172,6 +190,21 @@ const DATASETS = [
     attempts: [
       { url: `${BLM_SMA}/22/query`, outFields: 'ADMIN_UNIT_NAME,ADMIN_AGENCY_CODE,ADMIN_ST' },
       { url: `${PADUS}/Federal_Fee_Managers_Authoritative_PADUS/FeatureServer/0/query`, where: "ManagerName = 'BLM'", outFields: 'ManagerName,BndryName,State_Nm' },
+    ],
+  },
+  {
+    name: 'nature-preserves',
+    label: 'Nature Preserves',
+    attempts: [
+      { url: `${PADUS}/Fee_Managers_PADUS/FeatureServer/0/query`, where: NATURE_PRESERVES_WHERE, outFields: 'Unit_Nm,Loc_Nm,Des_Tp,Mang_Name,Own_Name,State_Nm,GIS_Acres' },
+    ],
+    overpassQuery: PNW_NATURE_PRESERVES_OVERPASS,
+  },
+  {
+    name: 'usfs-fire-closures',
+    label: 'USFS Fire Closures',
+    attempts: [
+      { url: USFS_FIRE_CLOSURES, where: "ClosureStatus = 'Active'", outFields: 'ForestUnit,District,FireName,ClosureOrderName,ClosureOrderNumber,ClosureDescription,ClosureStatus,ClosureStartDate,ClosureEndDate,ClosureURLlink' },
     ],
   },
   {

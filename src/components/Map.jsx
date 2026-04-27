@@ -70,6 +70,7 @@ function flattenPublicLandAreas(publicLands) {
     publicLands?.wilderness,
     publicLands?.natParks,
     publicLands?.blmLands,
+    publicLands?.naturePreserves,
     publicLands?.waDnrLands,
   ].filter(Boolean)
 
@@ -111,11 +112,14 @@ function prepareWadnrFireSourceData(wadnrFires, publicLands, publicOnly) {
   const features = (wadnrFires.features || []).flatMap(feature => {
     const isPublicLand = pointInPublicLand(feature?.geometry?.coordinates, publicLandAreas)
     if (publicOnly && !isPublicLand) return []
+    const acresBurned = Number(feature?.properties?.ACRES_BURN)
+    const acresLabel = Number.isFinite(acresBurned) ? acresBurned.toFixed(2) : ''
 
     return [{
       ...feature,
       properties: {
         ...feature.properties,
+        ACRES_BURN_LABEL: acresLabel,
         IS_PUBLIC_LAND: isPublicLand ? 1 : 0,
       },
     }]
@@ -224,6 +228,69 @@ function ensurePublicLandLayer(map, id, geojson, fillColor, lineColor, fillOpaci
   })
 }
 
+function ensureHatchImage(map, id, stroke = '#7a0015') {
+  if (map.hasImage(id)) return
+
+  const size = 12
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+
+  ctx.clearRect(0, 0, size, size)
+  ctx.strokeStyle = stroke
+  ctx.lineWidth = 2
+  ctx.globalAlpha = 0.7
+
+  ctx.beginPath()
+  ctx.moveTo(-2, size - 2)
+  ctx.lineTo(size - 2, -2)
+  ctx.stroke()
+
+  ctx.beginPath()
+  ctx.moveTo(4, size + 2)
+  ctx.lineTo(size + 2, 4)
+  ctx.stroke()
+
+  const image = ctx.getImageData(0, 0, size, size)
+  map.addImage(id, image, { pixelRatio: 2 })
+}
+
+function ensureClosureLayer(map, id, geojson) {
+  const hatchId = `${id}-hatch-image`
+  ensureHatchImage(map, hatchId)
+
+  if (map.getSource(id)) {
+    map.getSource(id).setData(geojson)
+    return
+  }
+
+  map.addSource(id, { type: 'geojson', data: geojson })
+  map.addLayer({
+    id: `${id}-fill`,
+    type: 'fill',
+    source: id,
+    paint: {
+      'fill-color': '#b00020',
+      'fill-opacity': 0.16,
+      'fill-outline-color': '#6d0012',
+      'fill-pattern': hatchId,
+    },
+    layout: { visibility: 'none' },
+  })
+  map.addLayer({
+    id: `${id}-line`,
+    type: 'line',
+    source: id,
+    paint: {
+      'line-color': '#6d0012',
+      'line-width': ['interpolate', ['linear'], ['zoom'], 5, 1, 10, 2.2],
+      'line-opacity': 0.95,
+    },
+    layout: { visibility: 'none' },
+  })
+}
+
 function moveLayerIfPresent(map, layerId, beforeId) {
   if (!map.getLayer(layerId)) return
   if (beforeId && map.getLayer(beforeId)) {
@@ -240,6 +307,7 @@ export default function Map({
   fires2024,
   fires2025,
   wadnrFires,
+  usfsFireClosures,
   publicLands,
   showPublicLandFiresOnly,
   onPointClick,
@@ -288,6 +356,27 @@ export default function Map({
     if (!m || !mapReady) return
 
     const handleClick = (e) => {
+      if (m.getLayer('usfs-fire-closures-fill')) {
+        const closures = m.queryRenderedFeatures(e.point, { layers: ['usfs-fire-closures-fill'] })
+        if (closures.length > 0) {
+          const p = closures[0].properties || {}
+          onFeatureClick({
+            type: 'usfsClosure',
+            forest: p.ForestUnit || '',
+            district: p.District || '',
+            fireName: p.FireName || '',
+            name: p.ClosureOrderName || 'USFS Fire Closure',
+            orderNumber: p.ClosureOrderNumber || '',
+            description: p.ClosureDescription || '',
+            status: p.ClosureStatus || '',
+            startDate: p.ClosureStartDate || null,
+            endDate: p.ClosureEndDate || null,
+            url: p.ClosureURLlink || '',
+          })
+          return
+        }
+      }
+
       const fireLayers = ['fires-2024-fill', 'fires-2025-fill'].filter(id => m.getLayer(id))
       if (fireLayers.length > 0) {
         const features = m.queryRenderedFeatures(e.point, { layers: fireLayers })
@@ -338,7 +427,7 @@ export default function Map({
     const m = mapRef.current
     if (!m || !mapReady) return
 
-    const fireIds = ['fires-2024-fill', 'fires-2025-fill', 'wadnr-fires-circle']
+    const fireIds = ['fires-2024-fill', 'fires-2025-fill', 'wadnr-fires-circle', 'usfs-fire-closures-fill']
     const enter = () => { m.getCanvas().style.cursor = 'pointer' }
     const leave = () => { m.getCanvas().style.cursor = '' }
 
@@ -430,7 +519,7 @@ export default function Map({
       source: 'wadnr-fires',
       minzoom: 10,
       layout: {
-        'text-field': ['coalesce', ['get', 'INCIDENT_N'], ''],
+        'text-field': ['coalesce', ['get', 'ACRES_BURN_LABEL'], ''],
         'text-size': 11,
         'text-anchor': 'top',
         'text-offset': [0, 0.8],
@@ -449,6 +538,15 @@ export default function Map({
       },
     })
   }, [mapReady, wadnrFires, publicLands, showPublicLandFiresOnly])
+
+  // ── USFS fire closure polygons ───────────────────────────────────────────────
+  useEffect(() => {
+    const m = mapRef.current
+    if (!m || !mapReady || !usfsFireClosures) return
+    ensureClosureLayer(m, 'usfs-fire-closures', usfsFireClosures)
+    setVis(m, 'usfs-fire-closures-fill', layerVis.usfsFireClosures)
+    setVis(m, 'usfs-fire-closures-line', layerVis.usfsFireClosures)
+  }, [mapReady, usfsFireClosures]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Public lands vector layers ────────────────────────────────────────────────
   // After ensurePublicLandLayer adds layers (with visibility:'none'), immediately apply
@@ -488,6 +586,14 @@ export default function Map({
 
   useEffect(() => {
     const m = mapRef.current
+    if (!m || !mapReady || !publicLands?.naturePreserves) return
+    ensurePublicLandLayer(m, 'nature-preserves', publicLands.naturePreserves, '#8ecf6c', '#4f8a3c', 0.26)
+    setVis(m, 'nature-preserves-fill', layerVis.naturePreserves)
+    setVis(m, 'nature-preserves-line', layerVis.naturePreserves)
+  }, [mapReady, publicLands?.naturePreserves])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const m = mapRef.current
     if (!m || !mapReady || !publicLands?.waDnrLands) return
     ensurePublicLandLayer(m, 'wa-dnr-lands', publicLands.waDnrLands, '#6d8b3a', '#4a6028', 0.22)
     setVis(m, 'wa-dnr-lands-fill', layerVis.waDnrLands)
@@ -505,6 +611,8 @@ export default function Map({
     moveLayerIfPresent(m, 'fires-2025-fill', 'wadnr-fires-halo')
     moveLayerIfPresent(m, 'fires-2025-outline', 'wadnr-fires-halo')
     moveLayerIfPresent(m, 'fires-2025-label', 'wadnr-fires-halo')
+    moveLayerIfPresent(m, 'usfs-fire-closures-fill', 'wadnr-fires-halo')
+    moveLayerIfPresent(m, 'usfs-fire-closures-line', 'wadnr-fires-halo')
     moveLayerIfPresent(m, 'wadnr-fires-halo')
     moveLayerIfPresent(m, 'wadnr-fires-circle')
     moveLayerIfPresent(m, 'wadnr-fires-label')
@@ -515,6 +623,8 @@ export default function Map({
     setVis(m, 'fires-2025-fill',   layerVis.fires2025)
     setVis(m, 'fires-2025-outline', layerVis.fires2025)
     setVis(m, 'fires-2025-label',  layerVis.fires2025)
+    setVis(m, 'usfs-fire-closures-fill', layerVis.usfsFireClosures)
+    setVis(m, 'usfs-fire-closures-line', layerVis.usfsFireClosures)
     setVis(m, 'nat-forests-fill',  layerVis.natForests)
     setVis(m, 'nat-forests-line',  layerVis.natForests)
     setVis(m, 'wilderness-fill',   layerVis.wilderness)
@@ -523,6 +633,8 @@ export default function Map({
     setVis(m, 'nat-parks-line',    layerVis.natParks)
     setVis(m, 'blm-lands-fill',    layerVis.blmLands)
     setVis(m, 'blm-lands-line',    layerVis.blmLands)
+    setVis(m, 'nature-preserves-fill', layerVis.naturePreserves)
+    setVis(m, 'nature-preserves-line', layerVis.naturePreserves)
     setVis(m, 'wa-dnr-lands-fill', layerVis.waDnrLands)
     setVis(m, 'wa-dnr-lands-line', layerVis.waDnrLands)
     setVis(m, 'wadnr-fires-halo',   layerVis.wadnrFires)

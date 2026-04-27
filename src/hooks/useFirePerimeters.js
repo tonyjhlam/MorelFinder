@@ -159,13 +159,17 @@ async function loadStaticFile(year) {
 
 // ── React hook ────────────────────────────────────────────────────────────────
 
-export function useFirePerimeters(year) {
+export function useFirePerimeters(year, enabled = true) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
   useEffect(() => {
     let cancelled = false
+    if (!enabled) {
+      setLoading(false)
+      return () => { cancelled = true }
+    }
     setLoading(true)
     setError(null)
 
@@ -187,7 +191,7 @@ export function useFirePerimeters(year) {
     })()
 
     return () => { cancelled = true }
-  }, [year])
+  }, [year, enabled])
 
   return { data, loading, error }
 }

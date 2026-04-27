@@ -11,8 +11,12 @@ const LAYER_GROUPS = [
     ids: ['wadnrFires'],
   },
   {
+    label: 'Fire Closures',
+    ids: ['usfsFireClosures'],
+  },
+  {
     label: 'Public Lands',
-    ids: ['natForests', 'wilderness', 'natParks', 'blmLands', 'waDnrLands'],
+    ids: ['natForests', 'wilderness', 'natParks', 'blmLands', 'naturePreserves', 'waDnrLands'],
   },
 ]
 

@@ -46,12 +46,16 @@ async function fetchLive() {
   return null
 }
 
-export function useWADNRFirePoints(year) {
+export function useWADNRFirePoints(year, enabled = true) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let cancelled = false
+    if (!enabled) {
+      setLoading(false)
+      return () => { cancelled = true }
+    }
     setLoading(true)
 
     ;(async () => {
@@ -65,7 +69,7 @@ export function useWADNRFirePoints(year) {
     })()
 
     return () => { cancelled = true }
-  }, [year])
+  }, [year, enabled])
 
   return { data, loading }
 }

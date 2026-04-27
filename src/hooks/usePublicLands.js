@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 
 const LIVING_ATLAS = 'https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services'
+const PADUS = 'https://services.arcgis.com/v01gqwM5QqNysAAi/ArcGIS/rest/services'
 const PNW_BBOX = { xmin: -126, ymin: 44, xmax: -115, ymax: 50 }
+const NATURE_PRESERVES_WHERE = "Des_Tp <> 'MIL' AND (UPPER(Unit_Nm) LIKE '%PRESERVE%' OR UPPER(Unit_Nm) LIKE '%RESERVE%' OR UPPER(Unit_Nm) LIKE '%NATURAL AREA%' OR UPPER(Loc_Nm) LIKE '%PRESERVE%' OR UPPER(Loc_Nm) LIKE '%RESERVE%' OR UPPER(Loc_Nm) LIKE '%NATURAL AREA%' OR UPPER(Des_Tp) LIKE '%PRESERVE%' OR UPPER(Des_Tp) LIKE '%RESERVE%' OR UPPER(Des_Tp) LIKE '%NATURAL AREA%')"
 
 // Washington State bounds (lat_min,lon_min,lat_max,lon_max — Overpass order)
 const WA_BBOX = '45.54,-124.8,49.1,-116.9'
-
 // [out:json] + out geom; gives member-way geometries embedded in relations.
 // Using json (not geojson) because Overpass's geojson output doesn't reliably
 // convert type=boundary relations (Cougar Mtn, Tiger Mtn, etc.) to Polygon.
@@ -157,6 +158,25 @@ async function loadStateLocalPublicLandsLive() {
   return mergeCollections([stateLands, localLands])
 }
 
+async function loadNaturePreservesLive() {
+  return fetchArcGisCollection(`${PADUS}/Fee_Managers_PADUS/FeatureServer/0/query`, {
+    where: NATURE_PRESERVES_WHERE,
+    outFields: 'Unit_Nm,Loc_Nm,Des_Tp,Mang_Name,Own_Name,State_Nm,GIS_Acres',
+  })
+}
+
+async function loadStateLocalPublicLands() {
+  const stateLocalStatic = await loadStatic('state-local-public-lands')
+  if (stateLocalStatic) return stateLocalStatic
+
+  const waDnrStatic = await loadStatic('wa-dnr-lands')
+  return (
+    await loadStateLocalPublicLandsLive() ??
+    waDnrStatic ??
+    await loadWAParksFromOverpass()
+  )
+}
+
 // Fetch WA state + county parks live from Overpass (CORS-enabled, no auth).
 // Covers Cougar Mountain (King County), Squak Mountain (WA State Parks),
 // Tiger Mountain (WA DNR), and all other named WA protected areas.
@@ -188,38 +208,58 @@ async function loadWAParksFromOverpass() {
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
-export function usePublicLands() {
+const PUBLIC_LAND_LOADERS = {
+  natForests: () => loadStatic('national-forests'),
+  wilderness: () => loadStatic('wilderness'),
+  natParks: () => loadStatic('national-parks'),
+  blmLands: () => loadStatic('blm-lands'),
+  naturePreserves: async () => {
+    const staticData = await loadStatic('nature-preserves')
+    return staticData ?? await loadNaturePreservesLive()
+  },
+  waDnrLands: loadStateLocalPublicLands,
+}
+
+export function usePublicLands(enabled = {}) {
   const [data, setData] = useState({
     natForests: null,
     wilderness: null,
     natParks: null,
     blmLands: null,
+    naturePreserves: null,
     waDnrLands: null,
   })
 
   useEffect(() => {
+    const requestedIds = Object.entries(enabled)
+      .filter(([, isEnabled]) => !!isEnabled)
+      .map(([id]) => id)
+      .filter(id => !data[id])
+
+    if (requestedIds.length === 0) return undefined
+
+    let cancelled = false
+
     async function load() {
-      const [natForests, wilderness, natParks, blmLands, stateLocalStatic, waDnrStatic] = await Promise.all([
-        loadStatic('national-forests'),
-        loadStatic('wilderness'),
-        loadStatic('national-parks'),
-        loadStatic('blm-lands'),
-        loadStatic('state-local-public-lands'),
-        loadStatic('wa-dnr-lands'),
-      ])
+      const loadedEntries = await Promise.all(
+        requestedIds.map(async (id) => [id, await PUBLIC_LAND_LOADERS[id]?.()] )
+      )
 
-      // Prefer the expanded PNW state/local lands dataset, then fall back
-      // to live ArcGIS, then the legacy WA-only file, then WA OSM parks.
-      const waDnrLands =
-        stateLocalStatic ??
-        await loadStateLocalPublicLandsLive() ??
-        waDnrStatic ??
-        await loadWAParksFromOverpass()
+      if (cancelled) return
 
-      setData({ natForests, wilderness, natParks, blmLands, waDnrLands })
+      setData(prev => {
+        const next = { ...prev }
+        loadedEntries.forEach(([id, value]) => {
+          next[id] = value
+        })
+        return next
+      })
     }
+
     load()
-  }, [])
+
+    return () => { cancelled = true }
+  }, [enabled, data])
 
   return data
 }

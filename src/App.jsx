@@ -6,6 +6,7 @@ import Legend from './components/Legend.jsx'
 import { useFirePerimeters } from './hooks/useFirePerimeters.js'
 import { useWADNRFirePoints } from './hooks/useWADNRFirePoints.js'
 import { usePublicLands } from './hooks/usePublicLands.js'
+import { useUsfsFireClosures } from './hooks/useUsfsFireClosures.js'
 import './App.css'
 
 export const LAYERS = {
@@ -51,6 +52,13 @@ export const LAYERS = {
     color: '#c9a227',
     defaultOn: true,
   },
+  naturePreserves: {
+    id: 'naturePreserves',
+    label: 'Nature Preserves',
+    description: 'Nature reserves and preserve-style protected areas across the PNW',
+    color: '#8ecf6c',
+    defaultOn: false,
+  },
   waDnrLands: {
     id: 'waDnrLands',
     label: 'State & Local Public Lands',
@@ -65,6 +73,13 @@ export const LAYERS = {
     color: '#FF4500',
     defaultOn: true,
   },
+  usfsFireClosures: {
+    id: 'usfsFireClosures',
+    label: 'USFS Fire Closure Areas',
+    description: 'Active USDA Forest Service Region 6 emergency closure polygons',
+    color: '#b00020',
+    defaultOn: false,
+  },
 }
 
 function buildDefaultVisibility() {
@@ -73,18 +88,32 @@ function buildDefaultVisibility() {
   return v
 }
 
+function buildRequestedLayers() {
+  return buildDefaultVisibility()
+}
+
 export default function App() {
   const [layerVis, setLayerVis] = useState(buildDefaultVisibility)
+  const [requestedLayers, setRequestedLayers] = useState(buildRequestedLayers)
   const [showPublicLandFiresOnly, setShowPublicLandFiresOnly] = useState(false)
   const [clickedInfo, setClickedInfo] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
-  const { data: fires2024 } = useFirePerimeters(2024)
-  const { data: fires2025 } = useFirePerimeters(2025)
-  const { data: wadnrFires } = useWADNRFirePoints(2025)
-  const publicLands = usePublicLands()
+  const { data: fires2024 } = useFirePerimeters(2024, requestedLayers.fires2024)
+  const { data: fires2025 } = useFirePerimeters(2025, requestedLayers.fires2025)
+  const { data: wadnrFires } = useWADNRFirePoints(2025, requestedLayers.wadnrFires)
+  const { data: usfsFireClosures } = useUsfsFireClosures(requestedLayers.usfsFireClosures)
+  const publicLands = usePublicLands({
+    natForests: requestedLayers.natForests,
+    wilderness: requestedLayers.wilderness,
+    natParks: requestedLayers.natParks,
+    blmLands: requestedLayers.blmLands,
+    naturePreserves: requestedLayers.naturePreserves,
+    waDnrLands: requestedLayers.waDnrLands,
+  })
 
   const toggleLayer = useCallback((id) => {
+    setRequestedLayers(prev => (prev[id] ? prev : { ...prev, [id]: true }))
     setLayerVis(prev => ({ ...prev, [id]: !prev[id] }))
   }, [])
 
@@ -119,6 +148,7 @@ export default function App() {
             fires2024={fires2024}
             fires2025={fires2025}
             wadnrFires={wadnrFires}
+            usfsFireClosures={usfsFireClosures}
             publicLands={publicLands}
             showPublicLandFiresOnly={showPublicLandFiresOnly}
             onPointClick={handlePointClick}

@@ -234,6 +234,13 @@ function formatGps(lat, lng) {
   return `${Math.abs(lat).toFixed(5)}°${latDir}, ${Math.abs(lng).toFixed(5)}°${lngDir}`
 }
 
+function formatDateTime(value) {
+  if (!value) return null
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toLocaleString()
+}
+
 // ─── SNOTEL Info Panel ───────────────────────────────────────────────────────
 
 function SnotelInfo({ station }) {
@@ -431,10 +438,70 @@ function WADNRFireInfo({ info }) {
   )
 }
 
+function UsfsClosureInfo({ info }) {
+  const startDate = formatDateTime(info.startDate)
+  const endDate = formatDateTime(info.endDate)
+
+  return (
+    <>
+      <div className="fire-info-name">{info.name}</div>
+      <div style={{ fontSize: 11, color: '#b00020', marginBottom: 10, fontWeight: 600 }}>
+        USDA Forest Service Fire Closure
+      </div>
+      <div className="fire-meta-grid">
+        {info.forest && (
+          <div className="fire-meta-item">
+            <div className="fire-meta-value" style={{ fontSize: 13 }}>{info.forest}</div>
+            <div className="fire-meta-key">National Forest</div>
+          </div>
+        )}
+        {info.fireName && (
+          <div className="fire-meta-item">
+            <div className="fire-meta-value" style={{ fontSize: 13 }}>{info.fireName.trim()}</div>
+            <div className="fire-meta-key">Fire</div>
+          </div>
+        )}
+        {info.orderNumber && (
+          <div className="fire-meta-item">
+            <div className="fire-meta-value" style={{ fontSize: 13 }}>{info.orderNumber}</div>
+            <div className="fire-meta-key">Order Number</div>
+          </div>
+        )}
+        {info.status && (
+          <div className="fire-meta-item">
+            <div className="fire-meta-value">{info.status}</div>
+            <div className="fire-meta-key">Status</div>
+          </div>
+        )}
+      </div>
+      {(info.district || info.description) && (
+        <div style={{ fontSize: 11, color: '#6e7681', marginTop: 8, lineHeight: 1.7 }}>
+          {info.district && <div>District: {info.district}</div>}
+          {info.description && <div>Description: {info.description}</div>}
+        </div>
+      )}
+      {(startDate || endDate) && (
+        <div style={{ fontSize: 11, color: '#6e7681', marginTop: 8, lineHeight: 1.7 }}>
+          {startDate && <div>Starts: {startDate}</div>}
+          {endDate && <div>Ends: {endDate}</div>}
+        </div>
+      )}
+      {info.url && (
+        <div style={{ marginTop: 10 }}>
+          <a href={info.url} target="_blank" rel="noopener noreferrer" className="inat-link">
+            View USDA closure order →
+          </a>
+        </div>
+      )}
+    </>
+  )
+}
+
 const TITLES = {
   point: 'Soil Temperature',
   fire: 'Fire Perimeter',
   wadnrFire: 'WA DNR Fire Incident',
+  usfsClosure: 'USFS Fire Closure',
   snotel: 'SNOTEL Station',
   inat: 'iNaturalist Sighting',
 }
@@ -452,6 +519,7 @@ export default function InfoPanel({ info, onClose }) {
         {info?.type === 'point' && <SoilTempInfo lat={info.lat} lng={info.lng} />}
         {info?.type === 'fire' && <FireInfo info={info} />}
         {info?.type === 'wadnrFire' && <WADNRFireInfo info={info} />}
+        {info?.type === 'usfsClosure' && <UsfsClosureInfo info={info} />}
         {info?.type === 'snotel' && <SnotelInfo station={info.station} />}
         {info?.type === 'inat' && <InatInfo obs={info.obs} />}
       </div>
